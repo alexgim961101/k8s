@@ -13,15 +13,20 @@ kubeconfig
 !.env.example
 
 # Helm — 의존 차트와 패키지 산출물
-charts/**/charts/
+**/charts/charts/
 *.tgz
 
 # Terraform — state와 실제 변수값 (lock 파일은 커밋한다)
-.terraform/
+**/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfvars.json
 !*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
 
 # etcd 스냅샷 · 백업 산출물 (용량이 크고 재생성 가능)
 *.db
@@ -33,9 +38,10 @@ backups/
 ._*
 Thumbs.db
 
-# 에디터
+# 에디터 · 도구 로컬 설정
 .idea/
 .vscode/
+.claude/settings.local.json
 *.swp
 *~
 
