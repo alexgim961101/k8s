@@ -1,0 +1,44 @@
+# 자격증명 · 시크릿 — 절대 커밋하지 않는다
+kubeconfig
+*.kubeconfig
+.kube/
+*.pem
+*.key
+*.crt
+*.p12
+*-secret.yaml
+!*-secret.example.yaml
+.env
+.env.*
+!.env.example
+
+# Helm — 의존 차트와 패키지 산출물
+charts/**/charts/
+*.tgz
+
+# Terraform — state와 실제 변수값 (lock 파일은 커밋한다)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# etcd 스냅샷 · 백업 산출물 (용량이 크고 재생성 가능)
+*.db
+*.snapshot
+backups/
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+
+# 에디터
+.idea/
+.vscode/
+*.swp
+*~
+
+# 임시
+tmp/
+*.log
