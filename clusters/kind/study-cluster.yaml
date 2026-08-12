@@ -1,0 +1,23 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: study
+
+nodes:
+  - role: control-plane
+    # 호스트 포트를 노드로 넘겨 브라우저에서 바로 접근한다.
+    # 포트 매핑은 클러스터 생성 시에만 지정할 수 있어, W6의 Ingress 실습을 위해 미리 넣어둔다.
+    # 8080/8443을 쓰는 이유는 로컬의 기존 서비스와 충돌을 피하기 위함.
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 8443
+        protocol: TCP
+
+  - role: worker
+  - role: worker
+# W6에서 ingress-nginx를 설치할 때 컨트롤러를 이 노드에 고정시키려면 라벨이 필요하다.
+# kubeadmConfigPatches로도 넣을 수 있으나 kubeadm API 버전에 따라 형식이 달라지므로,
+# 버전에 의존하지 않는 방식으로 그때 직접 붙인다:
+#   kubectl label node study-control-plane ingress-ready=true
