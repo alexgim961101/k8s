@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terraform으로 EKS를 한 단계씩 구축하기</title>
+<style>
+/* ===== 테마 토큰 ===== */
+:root{
+  --bg:#f7f8fa; --panel:#ffffff; --node:#eef3f9; --text:#1c2530; --muted:#5b6673;
+  --line:#d6dce4; --edge:#7a8698; --accent:#2563eb; --accent-soft:#dbe7fd;
+  --warn-bg:#fef3c7; --warn-text:#92400e; --err-bg:#fee2e2; --err-text:#991b1b;
+  --code-bg:#f1f4f8;
+  --c1:#2563eb; --c2:#d97706; --c3:#059669; --c4:#dc2626;
+  --c5:#7c3aed; --c6:#0891b2; --c7:#db2777; --c8:#65a30d;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12161c; --panel:#1b2230; --node:#242f44; --text:#e6ebf2; --muted:#98a4b3;
+    --line:#2c3648; --edge:#8493a8; --accent:#60a5fa; --accent-soft:#1e3a5f;
+    --warn-bg:#3a2e10; --warn-text:#fcd34d; --err-bg:#3f1d1d; --err-text:#fca5a5;
+    --code-bg:#151b25;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12161c; --panel:#1b2230; --node:#242f44; --text:#e6ebf2; --muted:#98a4b3;
+  --line:#2c3648; --edge:#8493a8; --accent:#60a5fa; --accent-soft:#1e3a5f;
+  --warn-bg:#3a2e10; --warn-text:#fcd34d; --err-bg:#3f1d1d; --err-text:#fca5a5;
+  --code-bg:#151b25;
+}
+
+/* ===== 기본 레이아웃 ===== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,-apple-system,sans-serif;
+  font-size:15.5px; line-height:1.65;
+}
+main{max-width:880px;margin:0 auto;padding:20px 24px 80px}
+header.top{
+  position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+}
+.top-inner{max-width:880px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+.top h1{font-size:17px;margin:0;flex:1 1 auto;font-weight:700}
+#toc-btn{
+  display:none;border:1px solid var(--line);background:var(--panel);color:var(--text);
+  border-radius:8px;padding:4px 12px;cursor:pointer;font-size:13px;white-space:nowrap;
+}
+/* 넓은 화면: 본문 왼쪽 여백의 고정 사이드바 목차 */
+nav#toc{
+  position:fixed;top:84px;left:calc(50vw - 668px);width:208px;
+  max-height:calc(100vh - 130px);overflow-y:auto;
+  display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;
+}
+nav#toc a{
+  color:var(--muted);text-decoration:none;font-size:13px;line-height:1.45;
+  padding:5px 10px;border-left:2px solid var(--line);white-space:normal;
+}
+nav#toc a:hover{color:var(--text);background:var(--accent-soft)}
+nav#toc a.active{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+/* 좁은 화면: 사이드바를 숨기고 헤더 버튼 → 드롭다운 패널 */
+@media (max-width:1359px){
+  nav#toc{display:none}
+  #toc-btn{display:inline-block}
+  body.toc-open nav#toc{
+    display:flex;left:auto;right:16px;top:60px;width:min(320px,85vw);
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:8px;box-shadow:0 10px 32px rgba(0,0,0,.3);z-index:30;
+  }
+}
+#theme-btn{
+  flex:0 0 auto;border:1px solid var(--line);background:var(--panel);color:var(--text);
+  border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px;
+}
+
+/* ===== 섹션 ===== */
+section.unit{margin-top:44px;scroll-margin-top:74px}
+section.unit h2{
+  font-size:20px;margin:0 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);
+}
+section.unit > p{margin:12px 2px;color:var(--text)}
+details{
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:10px 16px;margin:12px 0;
+}
+details summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--muted)}
+details[open] summary{margin-bottom:8px;color:var(--text)}
+details p{font-size:14px;margin:8px 0}
+code{
+  background:var(--code-bg);border-radius:5px;padding:1.5px 6px;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.85em;
+}
+pre{
+  background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+  padding:12px 16px;overflow-x:auto;font-size:13px;line-height:1.55;
+}
+pre code{background:none;padding:0}
+.ref{font-size:12.5px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+
+/* ===== 용어 툴팁 ===== */
+dfn.term{
+  font-style:normal;cursor:help;position:relative;
+  text-decoration:underline dotted var(--accent) 1.5px;text-underline-offset:3px;
+}
+dfn.term::after{
+  content:attr(data-def);position:absolute;left:50%;bottom:calc(100% + 7px);
+  transform:translateX(-50%);width:max-content;max-width:min(300px,72vw);
+  background:var(--panel);color:var(--text);border:1px solid var(--line);
+  border-radius:9px;padding:7px 12px;font-size:12.5px;line-height:1.5;
+  box-shadow:0 8px 24px rgba(0,0,0,.22);z-index:25;pointer-events:none;white-space:normal;
+  opacity:0;visibility:hidden;transition:opacity .12s;
+}
+dfn.term:hover::after,dfn.term:focus::after{opacity:1;visibility:visible}
+.node.has-def{cursor:help}
+
+/* ===== 다이어그램 카드 ===== */
+figure.diagram{
+  margin:16px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:18px 18px 10px;
+}
+figure.diagram figcaption{
+  font-size:13px;color:var(--muted);text-align:center;padding:8px 0 6px;
+}
+.scroll{overflow-x:auto}
+.scroll svg{display:block;margin:0 auto;max-width:100%;height:auto}
+
+/* ===== SVG 공통 ===== */
+svg text{
+  font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  font-size:14px;fill:var(--text);dominant-baseline:central;
+}
+.node rect,.node polygon{fill:var(--node);stroke:var(--line);stroke-width:1.5}
+.node.hot rect,.node.hot polygon{stroke:var(--accent);stroke-width:2.5}
+.node .nref{font-size:11px;fill:var(--muted);font-family:ui-monospace,Menlo,monospace}
+.epath{fill:none;stroke:var(--edge);stroke-width:1.6}
+.edge.dashed .epath{stroke-dasharray:5 4}
+.edge.hot .epath{stroke:var(--accent);stroke-width:2.6}
+.elabel{font-size:13px;fill:var(--text);paint-order:stroke;stroke:var(--panel);stroke-width:4px;stroke-linejoin:round}
+.edge.hot .elabel{fill:var(--accent);font-weight:600}
+.stepping .edge.dim{opacity:.15}
+.stepping .node:not(.hot),.hovering .node.faded{opacity:.45}
+.hovering .edge.faded{opacity:.15}
+marker path.arw-n{fill:var(--edge)}
+marker path.arw-h{fill:var(--accent)}
+.lifeline{stroke:var(--edge);stroke-width:1.4;stroke-dasharray:4 4;opacity:.55}
+.lifeline.hot{stroke:var(--accent);stroke-width:2;opacity:1}
+.actor rect{fill:var(--node);stroke:var(--line);stroke-width:1.5}
+.actor text{font-weight:600}
+.actor.hot rect{stroke:var(--accent);stroke-width:2.5}
+.initdot{fill:var(--edge)}
+
+/* ===== step-through 컨트롤 ===== */
+.steps{display:flex;align-items:center;gap:8px;justify-content:center;padding:8px 0 2px}
+.steps button{
+  border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:7px;
+  padding:3px 12px;cursor:pointer;font-size:13px;
+}
+.steps button:hover{border-color:var(--accent);color:var(--accent)}
+.step-ind{font-size:12.5px;color:var(--muted);min-width:44px;text-align:center}
+.step-note{
+  margin:8px auto 2px;max-width:600px;min-height:22px;
+  background:var(--accent-soft);color:var(--text);font-size:13.5px;line-height:1.55;
+  border-radius:9px;padding:8px 16px;text-align:center;
+}
+.step-note.hint{background:transparent;color:var(--muted);font-size:12.5px;padding:4px}
+.step-note.empty{visibility:hidden}
+
+/* ===== 경고 배너 ===== */
+.diag-banner{border-radius:9px;padding:10px 14px;font-size:13px;margin-bottom:10px}
+.diag-banner.warn{background:var(--warn-bg);color:var(--warn-text)}
+.diag-banner.error{background:var(--err-bg);color:var(--err-text)}
+.diag-banner ul{margin:4px 0 0;padding-left:18px}
+
+/* ===== layers (HTML 렌더) ===== */
+.layers{display:flex;flex-direction:column;gap:2px;align-items:stretch}
+.layer{
+  border:1.5px solid var(--line);border-radius:11px;background:var(--node);
+  padding:10px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+}
+.layer-label{font-weight:700;font-size:13.5px;min-width:96px;color:var(--muted)}
+.layer-items{display:flex;gap:8px;flex-wrap:wrap;flex:1}
+.chip{
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:4px 12px;font-size:13.5px;
+}
+.chip.has-ref{border-bottom:2px solid var(--accent);cursor:help}
+.layer-sep{text-align:center;color:var(--edge);font-size:12px;line-height:1.1;padding:2px 0}
+
+/* ===== bar / donut ===== */
+.bars{display:flex;flex-direction:column;gap:9px;padding:6px 2px}
+.bar-row{display:flex;align-items:center;gap:12px}
+.bar-label{flex:0 0 130px;text-align:right;font-size:13.5px;color:var(--text)}
+.bar-track{flex:1;background:var(--bg);border-radius:6px;height:20px;overflow:hidden}
+.bar-fill{height:100%;background:var(--c1);border-radius:6px;min-width:2px}
+.bar-row:nth-child(2) .bar-fill{background:var(--c2)}
+.bar-row:nth-child(3) .bar-fill{background:var(--c3)}
+.bar-row:nth-child(4) .bar-fill{background:var(--c4)}
+.bar-row:nth-child(5) .bar-fill{background:var(--c5)}
+.bar-row:nth-child(6) .bar-fill{background:var(--c6)}
+.bar-val{flex:0 0 72px;font-size:13px;color:var(--muted)}
+.donut-wrap{display:flex;align-items:center;gap:26px;justify-content:center;flex-wrap:wrap;padding:6px}
+.legend{display:flex;flex-direction:column;gap:6px}
+.legend-row{display:flex;align-items:center;gap:9px;font-size:13.5px}
+.legend-dot{width:12px;height:12px;border-radius:4px;flex:0 0 auto}
+
+/* ===== 확인 질문 ===== */
+details.quiz{border-left:3px solid var(--accent)}
+details.quiz summary{color:var(--text);font-weight:600;font-size:14px;line-height:1.5}
+details.quiz[open] summary{color:var(--accent)}
+details.quiz p{color:var(--muted)}
+
+/* ===== 다음 학습 키워드 ===== */
+.keywords{display:flex;flex-direction:column;gap:10px;margin:14px 0}
+.kw{display:flex;gap:12px;align-items:baseline}
+.kw b{
+  flex:0 0 auto;background:var(--accent-soft);color:var(--accent);
+  border-radius:7px;padding:2px 11px;font-size:13.5px;font-weight:600;white-space:nowrap;
+}
+.kw span{color:var(--muted);font-size:13.5px;line-height:1.5}
+
+/* ===== 비교 카드 ===== */
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:14px 0}
+.compare .card{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+}
+.compare .card h3{margin:0 0 8px;font-size:15px;color:var(--accent)}
+.compare .card ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--text)}
+.compare .card li{margin:4px 0}
+
+@media print{.steps,#theme-btn,#toc-btn,nav#toc{display:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <h1>Terraform으로 EKS를 한 단계씩 구축하기</h1>
+    <button id="toc-btn" aria-label="목차 열기">☰ 목차</button>
+    <button id="theme-btn" aria-label="테마 전환">☾</button>
+  </div>
+</header>
+<nav id="toc" aria-label="목차"></nav>
+<noscript><div class="diag-banner error" style="margin:20px">이 문서의 다이어그램은 JavaScript로 렌더링됩니다. JavaScript를 활성화해 주세요.</div></noscript>
+<main>
+<section class="unit"><h2>1. Terraform과 EKS란 — 왜 같이 쓰는가</h2><figure class="diagram" data-diagram><script type="application/json">{"type":"layers","layers":[{"label":"원하는 상태","items":[{"label":"Terraform 코드","ref":"05-eks-gitops/labs/terraform-eks-workshop.md:1"}]},{"label":"AWS 기반","items":[{"label":"VPC"},{"label":"IAM"},{"label":"EKS"}]},{"label":"Kubernetes","items":[{"label":"관리형 노드"},{"label":"Pod"}]}]}</script><figcaption>코드는 AWS 기반을 만들고, 그 위에서 Kubernetes가 워크로드를 관리한다.</figcaption></figure><p><dfn class="term" tabindex="0" data-def="인프라의 원하는 상태를 코드로 적는 방식">Terraform</dfn>은 ‘땅(terra)을 만들다(form)’라는 이름처럼 인프라를 선언으로 만든다. Amazon EKS는 AWS가 control plane을 관리하는 Kubernetes 서비스로, 직접 관리해야 할 서버를 줄이기 위해 도입됐다.</p><details><summary>이 실습의 경계</summary><p>처음에는 공개 EKS module 대신 AWS 리소스를 직접 선언한다. 각 IAM role과 네트워크 경로를 이해한 뒤, 공개 module과 비교한다.</p></details></section><section class="unit"><h2>2. 책임은 세 층으로 나뉜다</h2><figure class="diagram" data-diagram><script type="application/json">{"type":"layers","layers":[{"label":"AWS 관리","items":[{"label":"EKS control plane","def":"Kubernetes의 결정을 내리는 AWS 관리 영역"}]},{"label":"내가 선언","items":[{"label":"VPC·NAT"},{"label":"IAM role"},{"label":"Node Group"},{"label":"Access entry"}]},{"label":"클러스터 안","items":[{"label":"Add-on"},{"label":"앱 Pod"},{"label":"GitOps"}]}]}</script><figcaption>EKS가 control plane을 맡아도 비용·네트워크·권한·워크로드의 책임은 남는다.</figcaption></figure><p>EKS가 etcd와 API server의 가용성을 대신 관리하지만 node, VPC, IAM, add-on과 비용은 사용자의 책임이다. 이 문서는 node lifecycle을 AWS가 관리하는 <dfn class="term" tabindex="0" data-def="AWS가 만들고 업데이트를 돕는 EC2 노드 묶음">Managed Node Group</dfn>을 선택한다.</p></section><section class="unit"><h2>3. state를 격리해 실수의 반경을 줄인다</h2><figure class="diagram" data-diagram data-step-through><script type="application/json">{"type":"flow","nodes":[{"id":"code","label":"lab 코드","col":0,"row":0,"ref":"05-eks-gitops/labs/terraform-eks-workshop.md:40"},{"id":"lock","label":"S3 state·lock","col":0,"row":1,"ref":"05-eks-gitops/labs/terraform-eks/backend.hcl.example","def":"동시에 바꾸지 못하도록 잠그는 기록"},{"id":"plan","label":"plan 검토","col":0,"row":2},{"id":"aws","label":"AWS 리소스","col":0,"row":3},{"id":"prod","label":"운영 state","col":1,"row":2,"def":"이번 실습에서 건드리지 않는 기존 상태"}],"edges":[{"from":"code","to":"lock","label":"읽기·기록","note":"lab 전용 key가 현재 상태를 운영 환경과 분리한다."},{"from":"lock","to":"plan","label":"비교","note":"Terraform은 코드와 기록된 상태의 차이를 먼저 보여 준다."},{"from":"plan","to":"aws","label":"승인 후 apply","note":"생성·변경·삭제 대상을 읽고 나서만 AWS에 반영한다."}]}</script><figcaption>실습은 별도 state key에서만 한다. 운영 VPC를 재사용하지 않는다.</figcaption></figure><p>실습 코드는 이 저장소에 남기고, backend 예시는 Git에 남긴다. <code>aws/lab/...</code> key를 새로 써야 실습의 destroy가 운영 리소스를 향하지 않는다.</p></section><section class="unit"><h2>4. Pod가 이미지를 받기까지의 네트워크</h2><figure class="diagram" data-diagram data-step-through><script type="application/json">{"type":"flow","nodes":[{"id":"pod","label":"Pod","col":0,"row":0},{"id":"node","label":"private node","col":0,"row":1},{"id":"rt","label":"private route","col":0,"row":2},{"id":"nat","label":"NAT Gateway","col":0,"row":3,"def":"private 서버가 밖으로 나갈 때 대신 쓰는 출구"},{"id":"igw","label":"Internet Gateway","col":0,"row":4},{"id":"ecr","label":"ECR·외부 image","col":0,"row":5}],"edges":[{"from":"pod","to":"node","label":"실행","note":"Pod는 node의 네트워크 위에서 실행된다."},{"from":"node","to":"rt","label":"image 요청","note":"private subnet의 기본 경로는 NAT를 향한다."},{"from":"rt","to":"nat","label":"0.0.0.0/0","note":"NAT는 외부로 나가는 연결을 중계한다."},{"from":"nat","to":"igw","label":"public subnet","note":"NAT 자신은 Internet Gateway 경로를 쓴다."},{"from":"igw","to":"ecr","label":"pull","note":"node가 image와 add-on을 내려받을 수 있다."}]}</script><figcaption>학습용은 NAT 하나다. 운영의 AZ 장애 대응과 비용 설계는 별도 문제다.</figcaption></figure><p>실습용 network module에는 먼저 private subnet만 만들고 NAT/private route를 뒤에 추가한다. 워크숍은 먼저 이를 명시적으로 추가해 node가 ECR과 인터넷으로 나갈 수 있게 한다.</p></section><section class="unit"><h2>5. apply는 IAM → cluster → node 순서다</h2><figure class="diagram" data-diagram data-step-through><script type="application/json">{"type":"flow","nodes":[{"id":"net","label":"VPC·private subnet","col":0,"row":0,"ref":"05-eks-gitops/labs/terraform-eks/modules/network/main.tf"},{"id":"crole","label":"cluster role","col":0,"row":1},{"id":"cluster","label":"EKS cluster","col":0,"row":2},{"id":"nrole","label":"node role","col":0,"row":3},{"id":"nodes","label":"Managed Node Group","col":0,"row":4},{"id":"addon","label":"기본 add-on","col":0,"row":5}],"edges":[{"from":"net","to":"crole","label":"준비","note":"EKS와 node가 사용할 VPC와 IAM 신뢰 관계를 먼저 만든다."},{"from":"crole","to":"cluster","label":"EKS assume","note":"EKS 서비스가 cluster role을 assume해 control plane을 만든다."},{"from":"cluster","to":"nrole","label":"cluster 생성","note":"node는 만들어진 cluster에 join한다."},{"from":"nrole","to":"nodes","label":"EC2 assume","note":"node role은 worker·CNI·ECR image pull 권한을 제공한다."},{"from":"nodes","to":"addon","label":"Ready","note":"node가 준비된 뒤 VPC CNI, CoreDNS, kube-proxy를 선언한다."}]}</script><figcaption>Terraform의 참조와 depends_on이 안전한 생성 순서를 만든다.</figcaption></figure><p>cluster role과 node role은 목적이 다르므로 분리한다. <code>plan</code>에서 기존 VPC가 replace되지 않는지, node group이 private subnet만 쓰는지를 매번 확인한다.</p></section><section class="unit"><h2>6. 사람의 kubectl 접근은 access entry로 준다</h2><figure class="diagram" data-diagram data-step-through><script type="application/json">{"type":"sequence","actors":[{"id":"user","label":"IAM 사용자·역할"},{"id":"cli","label":"AWS CLI"},{"id":"eks","label":"EKS API"},{"id":"k8s","label":"Kubernetes API"}],"messages":[{"from":"user","to":"cli","label":"update-kubeconfig","note":"현재 IAM identity로 kubeconfig의 인증 설정을 만든다."},{"from":"cli","to":"eks","label":"토큰 요청","note":"AWS IAM 인증은 EKS API로 전달된다."},{"from":"eks","to":"k8s","label":"access entry 확인","note":"Terraform이 만든 IAM principal과 access policy를 대조한다."},{"from":"k8s","to":"user","label":"kubectl 허용","style":"dashed","note":"cluster-admin policy가 연결된 대상만 해당 권한을 얻는다."}]}</script><figcaption>STS session ARN이 아니라 실제 IAM user/role ARN을 access entry에 쓴다.</figcaption></figure><p><dfn class="term" tabindex="0" data-def="IAM 대상과 Kubernetes 권한을 연결하는 EKS 설정">access entry</dfn>는 legacy <code>aws-auth</code> ConfigMap보다 AWS API에서 권한을 관리하기 쉽다. <code>kubectl auth can-i</code>와 <code>aws eks list-access-entries</code>를 함께 확인한다.</p></section><section class="unit"><h2>7. 검증 후 destroy까지가 한 실습이다</h2><figure class="diagram" data-diagram data-step-through><script type="application/json">{"type":"flow","nodes":[{"id":"nodes","label":"kubectl get nodes","col":0,"row":0},{"id":"system","label":"kube-system Pod","col":0,"row":1},{"id":"smoke","label":"nginx smoke test","col":0,"row":2},{"id":"dplan","label":"plan -destroy","col":0,"row":3},{"id":"destroy","label":"terraform destroy","col":0,"row":4},{"id":"check","label":"남은 리소스 확인","col":0,"row":5}],"edges":[{"from":"nodes","to":"system","label":"Ready","note":"node가 Ready여야 system add-on의 상태를 신뢰할 수 있다."},{"from":"system","to":"smoke","label":"정상","note":"작은 Deployment로 image pull과 scheduling을 검증한다."},{"from":"smoke","to":"dplan","label":"기록","note":"성공 또는 장애 원인을 notes에 남긴 뒤 삭제 계획을 읽는다."},{"from":"dplan","to":"destroy","label":"전체 포함","note":"EKS, node, NAT, EIP, VPC가 plan에 포함됐을 때만 삭제한다."},{"from":"destroy","to":"check","label":"완료","note":"state와 AWS CLI에서 과금 리소스가 남지 않았는지 확인한다."}]}</script><figcaption>오류가 나면 먼저 route·IAM·endpoint CIDR·node group health를 조사한다.</figcaption></figure><p><code>terraform destroy</code>는 실패가 아니라 재현성을 증명하는 마지막 단계다. 콘솔에서 수동으로 고친 리소스가 있으면 Terraform state와 실제 AWS가 달라질 수 있다.</p></section><section class="unit"><h2>8. 면접 질문으로 점검하기</h2><details class="quiz"><summary>Q1. EKS를 써도 내가 계속 관리해야 하는 것은 무엇인가?</summary><p>control plane HA는 AWS가 관리하지만 VPC, node 용량, IAM, add-on, 워크로드와 비용은 사용자의 책임이다.</p></details><details class="quiz"><summary>Q2. private node에 NAT가 필요한 이유는?</summary><p>node가 ECR image와 add-on을 받기 위한 outbound 경로가 필요하다. private subnet이 public IP를 갖게 하려는 목적은 아니다.</p></details><details class="quiz"><summary>Q3. cluster role과 node role을 분리하는 이유는?</summary><p>assume 주체와 권한 목적이 다르다. 같은 넓은 권한을 주면 최소 권한을 지킬 수 없다.</p></details><details class="quiz"><summary>Q4. 왜 aws-auth 대신 access entry를 쓰는가?</summary><p>IAM principal과 EKS 권한을 AWS API·Terraform으로 함께 선언하고 복구 경로를 남길 수 있다.</p></details><details class="quiz"><summary>Q5. 왜 destroy plan을 먼저 읽는가?</summary><p>현재 state가 lab인지와 모든 유료 의존 리소스가 삭제 대상인지 확인한다.</p></details></section><section class="unit"><h2>9. 다음 학습 키워드</h2><div class="keywords"><div class="kw"><b>Pod Identity</b><span>node role이 아니라 service account별 IAM 권한을 주는 현재 방식</span></div><div class="kw"><b>IRSA</b><span>OIDC trust policy를 이용하는 기존 워크로드 권한 위임 방식</span></div><div class="kw"><b>AWS Load Balancer Controller</b><span>Ingress/Service 선언을 ALB·NLB 리소스로 연결하는 controller</span></div><div class="kw"><b>VPC endpoint</b><span>NAT 비용·인터넷 경로를 줄이기 위해 AWS 서비스에 사설로 연결하는 방법</span></div><div class="kw"><b>Argo CD</b><span>클러스터 안의 원하는 상태를 Git에서 pull해 동기화하는 GitOps 도구</span></div></div></section>
+</main>
+<script>
+'use strict';
+/* =========================================================================
+ * learn 스킬 내장 다이어그램 렌더러 — 외부 의존성 없음
+ * LLM은 <figure data-diagram> 안의 JSON 스펙만 작성하고,
+ * 좌표 계산·화살표 라우팅·줄바꿈은 전부 여기서 결정적으로 처리한다.
+ * ========================================================================= */
+const SVGNS='http://www.w3.org/2000/svg';
+const CFG={nodeW:170,nodeH:52,gapX:80,gapY:56,pad:28,font:14,lineH:20,refH:16};
+
+/* ---------- 공통 유틸 ---------- */
+function el(name,attrs,parent){
+  const n=document.createElementNS(SVGNS,name);
+  for(const k in attrs)n.setAttribute(k,attrs[k]);
+  if(parent)parent.appendChild(n);
+  return n;
+}
+function hdiv(cls,parent){
+  const d=document.createElement('div');
+  if(cls)d.className=cls;
+  if(parent)parent.appendChild(d);
+  return d;
+}
+const isWide=c=>/[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFF60]/.test(c);
+const chW=c=>isWide(c)?CFG.font:CFG.font*0.55;
+const strW=s=>[...String(s)].reduce((a,c)=>a+chW(c),0);
+
+/* 한국어(공백 없는 CJK 연속)도 안전하게 줄바꿈 */
+function wrap(text,maxW){
+  const out=[];
+  for(const rawLine of String(text).split('\n')){
+    const words=rawLine.split(' ');
+    let cur='',w=0;
+    const flush=()=>{if(cur){out.push(cur);cur='';w=0;}};
+    for(const word of words){
+      const ww=strW(word);
+      if(w&&w+chW(' ')+ww>maxW)flush();
+      if(ww>maxW){
+        flush();
+        let seg='',sw=0;
+        for(const c of word){const cw=chW(c);if(sw+cw>maxW&&seg){out.push(seg);seg='';sw=0;}seg+=c;sw+=cw;}
+        cur=seg;w=sw;
+      }else{
+        cur=cur?cur+' '+word:word;
+        w=w?w+chW(' ')+ww:ww;
+      }
+    }
+    flush();
+  }
+  return out.length?out:[''];
+}
+function textLines(parent,cx,cy,lines,cls){
+  const t=el('text',{'text-anchor':'middle',class:cls||''},parent);
+  const y0=cy-(lines.length-1)*CFG.lineH/2;
+  lines.forEach((ln,i)=>{
+    const ts=el('tspan',{x:cx,y:y0+i*CFG.lineH},t);
+    ts.textContent=ln;
+  });
+  return t;
+}
+function banner(fig,msgs,level){
+  const b=hdiv('diag-banner '+level);
+  b.textContent=level==='error'?'다이어그램 스펙 오류':'다이어그램 스펙 경고';
+  const ul=document.createElement('ul');
+  msgs.forEach(m=>{const li=document.createElement('li');li.textContent=m;ul.appendChild(li);});
+  b.appendChild(ul);
+  fig.insertBefore(b,fig.firstChild);
+}
+function shortRef(ref){
+  const m=String(ref).match(/^(.*?)(:\d+(?:-\d+)?)?$/);
+  const path=m[1].split('/').slice(-2).join('/');
+  return path+(m[2]||'');
+}
+function mount(fig,node){
+  const cap=fig.querySelector('figcaption');
+  if(cap)fig.insertBefore(node,cap);else fig.appendChild(node);
+}
+function makeSvg(fig,w,h,kind,uid){
+  const box=hdiv('scroll');
+  const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,width:w,height:h,'data-kind':kind,role:'img'},box);
+  svg.style.minWidth=Math.min(w,620)+'px';
+  const defs=el('defs',{},svg);
+  const mk=(id,cls)=>{
+    const m=el('marker',{id:id,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7.5,markerHeight:7.5,orient:'auto-start-reverse'},defs);
+    el('path',{d:'M0,0 L10,5 L0,10 z',class:cls},m);
+  };
+  mk('arw-'+uid,'arw-n');
+  mk('arwh-'+uid,'arw-h');
+  mount(fig,box);
+  return svg;
+}
+
+/* ---------- flow / state (그리드 레이아웃) ---------- */
+function layoutGrid(nodes,warns,errs){
+  const seen=new Set(),cells=new Set();
+  for(const n of nodes){
+    if(!n.id||n.label==null)errs.push(`노드에 id/label 필요: ${JSON.stringify(n)}`);
+    if(seen.has(n.id))errs.push(`중복 노드 id: ${n.id}`);
+    seen.add(n.id);
+    if(!Number.isInteger(n.col)||!Number.isInteger(n.row)||n.col<0||n.row<0){
+      errs.push(`노드 ${n.id}: col/row는 0 이상의 정수여야 함`);continue;
+    }
+    const key=n.col+','+n.row;
+    if(cells.has(key))errs.push(`그리드 충돌: (${n.col},${n.row})에 노드 2개 이상`);
+    cells.add(key);
+  }
+  if(nodes.length>9)warns.push(`노드 ${nodes.length}개 — 9개 이하 권장. 다이어그램 분할을 고려하세요.`);
+  if(errs.length)return null;
+
+  const geo={};
+  let maxCol=0,maxRow=0;
+  for(const n of nodes){maxCol=Math.max(maxCol,n.col);maxRow=Math.max(maxRow,n.row);}
+  const rowH=Array(maxRow+1).fill(CFG.nodeH);
+  for(const n of nodes){
+    const labelMax=n.shape==='diamond'?CFG.nodeW*0.52:CFG.nodeW-24;
+    n._lines=wrap(n.label,labelMax);
+    let h=Math.max(CFG.nodeH,n._lines.length*CFG.lineH+18+(n.ref?CFG.refH:0));
+    if(n.shape==='diamond')h=Math.max(h+22,66);
+    n._h=h;
+    rowH[n.row]=Math.max(rowH[n.row],h);
+  }
+  const rowY=[];let y=CFG.pad;
+  for(let r=0;r<=maxRow;r++){rowY[r]=y;y+=rowH[r]+CFG.gapY;}
+  const colX=c=>CFG.pad+c*(CFG.nodeW+CFG.gapX);
+  for(const n of nodes){
+    const x=colX(n.col);
+    const ny=rowY[n.row]+(rowH[n.row]-n._h)/2;
+    geo[n.id]={...n,x:x,y:ny,w:CFG.nodeW,h:n._h,cx:x+CFG.nodeW/2,cy:ny+n._h/2};
+  }
+  return {geo,w:CFG.pad*2+(maxCol+1)*CFG.nodeW+maxCol*CFG.gapX,h:y-CFG.gapY+CFG.pad,maxX:colX(maxCol)+CFG.nodeW,maxY:y-CFG.gapY};
+}
+function drawNode(svg,n){
+  const g=el('g',{class:'node','data-id':n.id},svg);
+  if(n.shape==='diamond'){
+    el('polygon',{points:`${n.cx},${n.y-8} ${n.x+n.w+10},${n.cy} ${n.cx},${n.y+n.h+8} ${n.x-10},${n.cy}`},g);
+  }else{
+    const rx=n.shape==='stadium'?n.h/2:10;
+    el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:rx},g);
+  }
+  const tip=[n.def,n.ref].filter(Boolean).join('\n');if(tip){const t=el('title',{},g);t.textContent=tip;}if(n.def)g.classList.add('has-def');
+  textLines(g,n.cx,n.cy-(n.ref?CFG.refH/2:0),n._lines,'nlabel');
+  if(n.ref){
+    const t=el('text',{'text-anchor':'middle',class:'nref'},g);
+    const ts=el('tspan',{x:n.cx,y:n.y+n.h-13},t);
+    ts.textContent=shortRef(n.ref);
+  }
+  return g;
+}
+function drawGridEdges(svg,edges,L,uid,warns,errs){
+  let rightLane=0,downLane=0;
+  edges.forEach((e,i)=>{
+    const s=L.geo[e.from],t=L.geo[e.to];
+    if(!s||!t){errs.push(`엣지 ${e.from}→${e.to}: 존재하지 않는 노드 참조`);return;}
+    let d,lx,ly,lw=130;
+    if(e.from===e.to){ /* 자기 자신 루프 — 라벨은 컬럼 간격 안에 수납 */
+      d=`M ${s.x+s.w} ${s.cy-10} C ${s.x+s.w+48} ${s.cy-16}, ${s.x+s.w+48} ${s.cy+16}, ${s.x+s.w} ${s.cy+10}`;
+      lx=s.x+s.w+34;ly=s.cy+30;lw=64; /* 같은 행 엣지 선과 겹치지 않게 루프 아래 배치 */
+      L.w=Math.max(L.w,s.x+s.w+110);
+    }else if(t.row>s.row&&t.col===s.col){ /* 아래 직진 */
+      d=`M ${s.cx} ${s.y+s.h} L ${t.cx} ${t.y}`;
+      lx=s.cx;ly=(s.y+s.h+t.y)/2;
+    }else if(t.row===s.row&&t.col>s.col){ /* 오른쪽 직진 */
+      d=`M ${s.x+s.w} ${s.cy} L ${t.x} ${t.cy}`;
+      lx=(s.x+s.w+t.x)/2;ly=s.cy-14;
+    }else if(t.row>s.row){ /* 아래 대각 → ㄱ자 */
+      const midY=t.y-CFG.gapY/2;
+      d=`M ${s.cx} ${s.y+s.h} V ${midY} H ${t.cx} V ${t.y}`;
+      lx=(s.cx+t.cx)/2;ly=midY;
+    }else if(t.row===s.row&&t.col<s.col){ /* 같은 행 역방향 → 컬럼 간격·아래 레인으로만 우회 (노드 관통 방지) */
+      const laneY=L.maxY+20+downLane*16;downLane++;
+      const gxS=s.x-CFG.gapX/2;
+      const gxT=Math.max(t.x-CFG.gapX/2,8);
+      d=`M ${s.x} ${s.cy} H ${gxS} V ${laneY} H ${gxT} V ${t.cy} H ${t.x}`;
+      lx=(gxS+gxT)/2;ly=laneY;
+      L.h=Math.max(L.h,laneY+CFG.pad+8);
+    }else{ /* 위로 향하는 역방향 → 오른쪽 레인·행 간격 경유 후 상단 진입 (노드 관통 방지) */
+      const laneX=L.maxX+24+rightLane*16;rightLane++;
+      const topGapY=Math.max(t.y-CFG.gapY/2,10);
+      const ex=Math.min(t.cx+20,t.x+t.w-14);
+      d=`M ${s.x+s.w} ${s.cy} H ${laneX} V ${topGapY} H ${ex} V ${t.y}`;
+      /* 라벨은 노드가 없는 상단 가로 구간(행 간격)에 배치 — 세로 레인은 노드와 겹칠 수 있음 */
+      lx=(laneX+ex)/2;ly=topGapY-14;
+      L.w=Math.max(L.w,laneX+CFG.pad+8);
+    }
+    const g=el('g',{class:'edge'+(e.style==='dashed'?' dashed':''),'data-from':e.from,'data-to':e.to,'data-i':i,'data-note':e.note||''},svg);
+    el('path',{d:d,class:'epath','marker-end':`url(#arw-${uid})`},g);
+    if(e.label)textLines(g,lx,ly,wrap(e.label,lw),'elabel');
+  });
+}
+function renderFlow(fig,spec,warns,errs,uid){
+  const nodes=spec.nodes||[],edges=spec.edges||[];
+  if(!nodes.length){errs.push('nodes가 비어 있음');return;}
+  if(spec.type==='state')nodes.forEach(n=>{if(!n.shape)n.shape='stadium';});
+  const L=layoutGrid(nodes,warns,errs);
+  if(!L)return;
+  const svg=makeSvg(fig,L.w,L.h,spec.type,uid);
+  drawGridEdges(svg,edges,L,uid,warns,errs);
+  nodes.forEach(n=>drawNode(svg,L.geo[n.id]));
+  let topExtra=0;
+  if(spec.type==='state'&&spec.initial){
+    const t=L.geo[spec.initial];
+    if(!t)errs.push(`initial이 가리키는 노드 없음: ${spec.initial}`);
+    else{
+      /* 첫 행 노드에서도 잘리지 않도록 viewBox 상단을 확장 */
+      topExtra=t.row===0?44:0;
+      el('circle',{cx:t.cx,cy:t.y-34,r:6,class:'initdot'},svg);
+      const g=el('g',{class:'edge'},svg);
+      el('path',{d:`M ${t.cx} ${t.y-27} L ${t.cx} ${t.y}`,class:'epath','marker-end':`url(#arw-${uid})`},g);
+    }
+  }
+  svg.setAttribute('viewBox',`0 ${-topExtra} ${L.w} ${L.h+topExtra}`);
+  svg.setAttribute('width',L.w);svg.setAttribute('height',L.h+topExtra);
+  initHover(fig,svg);
+  initSteps(fig,uid);
+}
+
+/* ---------- sequence ---------- */
+function renderSeq(fig,spec,warns,errs,uid){
+  const actors=spec.actors||[],msgs=spec.messages||[];
+  if(actors.length<2){errs.push('sequence에는 actors 2개 이상 필요');return;}
+  const ids=new Set();
+  actors.forEach(a=>{if(ids.has(a.id))errs.push(`중복 actor id: ${a.id}`);ids.add(a.id);});
+  msgs.forEach(m=>{if(!ids.has(m.from)||!ids.has(m.to))errs.push(`메시지 "${m.label}": 존재하지 않는 actor 참조 (${m.from}→${m.to})`);});
+  if(errs.length)return;
+  if(actors.length>6)warns.push(`actor ${actors.length}개 — 6개 이하 권장`);
+  if(msgs.length>12)warns.push(`메시지 ${msgs.length}개 — 12개 이하 권장. 시나리오 분할을 고려하세요.`);
+
+  const aW=Math.min(Math.max(...actors.map(a=>strW(a.label)+30),100),210);
+  /* 액터 간격을 가장 긴 메시지 라벨에 맞춰 넓힘 — 강제 줄바꿈 최소화(가독성) */
+  const maxLblW=Math.max(...msgs.filter(m=>m.from!==m.to).map(m=>strW(m.label||'')),0);
+  const gap=Math.max(aW+56,Math.min(maxLblW+70,360),210);
+  const xc={};
+  actors.forEach((a,i)=>{xc[a.id]=CFG.pad+aW/2+i*gap;});
+  const boxH=40,topY=CFG.pad;
+  let y=topY+boxH+38;
+  const pos=msgs.map(m=>{
+    const self=m.from===m.to;
+    /* 자기 호출 라벨은 다음 라이프라인을 넘지 않는 폭으로 줄바꿈 */
+    const span=self?Math.min(170,gap-80):Math.max(Math.abs(xc[m.to]-xc[m.from])-30,90);
+    const lines=wrap(m.label||'',span);
+    const p={y:y,lines:lines,self:self};
+    y+=lines.length*CFG.lineH+(self?46:28);
+    return p;
+  });
+  let w=CFG.pad*2+aW+(actors.length-1)*gap;
+  /* 마지막 액터의 자기 호출 라벨이 viewBox 밖으로 잘리지 않게 폭 확장 */
+  const lastId=actors[actors.length-1].id;
+  msgs.forEach((m,i)=>{
+    if(m.from===m.to&&m.from===lastId){
+      const lw=Math.max(...pos[i].lines.map(strW),0);
+      w=Math.max(w,xc[lastId]+62+lw+CFG.pad);
+    }
+  });
+  const h=y+CFG.pad;
+  const svg=makeSvg(fig,w,h,'sequence',uid);
+
+  const lineBot=h-CFG.pad+6;
+  actors.forEach(a=>{
+    el('line',{x1:xc[a.id],y1:topY+boxH,x2:xc[a.id],y2:lineBot,class:'lifeline','data-id':a.id},svg);
+  });
+  msgs.forEach((m,i)=>{
+    const p=pos[i];
+    const g=el('g',{class:'edge msg'+(m.style==='dashed'?' dashed':''),'data-from':m.from,'data-to':m.to,'data-i':i,'data-note':m.note||''},svg);
+    const labelCy=p.y+(p.lines.length-1)*CFG.lineH/2;
+    const arrowY=p.y+p.lines.length*CFG.lineH-4;
+    if(p.self){
+      const x=xc[m.from];
+      el('path',{d:`M ${x} ${arrowY} H ${x+52} V ${arrowY+20} H ${x+3}`,class:'epath','marker-end':`url(#arw-${uid})`},g);
+      const t=textLines(g,x+62,labelCy,p.lines,'elabel');
+      t.setAttribute('text-anchor','start');
+      t.querySelectorAll('tspan').forEach(ts=>ts.setAttribute('x',x+62));
+    }else{
+      const x1=xc[m.from],x2=xc[m.to],dir=x2>x1?1:-1;
+      el('path',{d:`M ${x1} ${arrowY} L ${x2-dir*4} ${arrowY}`,class:'epath','marker-end':`url(#arw-${uid})`},g);
+      textLines(g,(x1+x2)/2,labelCy,p.lines,'elabel');
+    }
+  });
+  actors.forEach(a=>{
+    const g=el('g',{class:'actor node','data-id':a.id},svg);
+    el('rect',{x:xc[a.id]-aW/2,y:topY,width:aW,height:boxH,rx:9},g);
+    textLines(g,xc[a.id],topY+boxH/2,wrap(a.label,aW-18),'nlabel');
+  });
+  initSteps(fig,uid);
+}
+
+/* ---------- tree ---------- */
+function renderTree(fig,spec,warns,errs,uid){
+  if(!spec.root){errs.push('tree에는 root가 필요');return;}
+  const TW=150,SLOT=TW+32,LGAP=48;
+  const all=[],ids=new Set();
+  let leaf=0;
+  (function walk(n,depth){
+    if(!n.id||n.label==null){errs.push(`트리 노드에 id/label 필요: ${JSON.stringify(n).slice(0,60)}`);return;}
+    if(ids.has(n.id))errs.push(`중복 트리 노드 id: ${n.id}`);
+    ids.add(n.id);
+    n._depth=depth;
+    n._lines=wrap(n.label,TW-20);
+    n._h=Math.max(44,n._lines.length*CFG.lineH+16+(n.ref?CFG.refH:0));
+    all.push(n);
+    if(n.children&&n.children.length){
+      n.children.forEach(c=>walk(c,depth+1));
+      n._slot=(n.children[0]._slot+n.children[n.children.length-1]._slot)/2;
+    }else{
+      n._slot=leaf++;
+    }
+  })(spec.root,0);
+  if(errs.length)return;
+  if(all.length>12)warns.push(`트리 노드 ${all.length}개 — 12개 이하 권장`);
+  const depthH=[];
+  all.forEach(n=>{depthH[n._depth]=Math.max(depthH[n._depth]||0,n._h);});
+  const depthY=[];let y=CFG.pad;
+  depthH.forEach((dh,d)=>{depthY[d]=y;y+=dh+LGAP;});
+  const w=CFG.pad*2+Math.max(leaf,1)*SLOT-26;
+  const h=y-LGAP+CFG.pad;
+  const svg=makeSvg(fig,w,h,'tree',uid);
+  all.forEach(n=>{
+    n._x=CFG.pad+n._slot*SLOT;
+    n._y=depthY[n._depth];
+    n._cx=n._x+TW/2;
+  });
+  all.forEach(n=>{
+    (n.children||[]).forEach(c=>{
+      const g=el('g',{class:'edge'},svg);
+      el('path',{d:`M ${n._cx} ${n._y+n._h} V ${c._y-LGAP/2} H ${c._cx} V ${c._y}`,class:'epath','marker-end':`url(#arw-${uid})`},g);
+    });
+  });
+  all.forEach(n=>{
+    const g=el('g',{class:'node','data-id':n.id},svg);
+    el('rect',{x:n._x,y:n._y,width:TW,height:n._h,rx:9},g);
+    const tip=[n.def,n.ref].filter(Boolean).join('\n');if(tip){const t=el('title',{},g);t.textContent=tip;}if(n.def)g.classList.add('has-def');
+    textLines(g,n._cx,n._y+n._h/2-(n.ref?CFG.refH/2:0),n._lines,'nlabel');
+    if(n.ref){
+      const t=el('text',{'text-anchor':'middle',class:'nref'},g);
+      const ts=el('tspan',{x:n._cx,y:n._y+n._h-12},t);
+      ts.textContent=shortRef(n.ref);
+    }
+  });
+}
+
+/* ---------- layers (HTML) ---------- */
+function renderLayers(fig,spec,warns,errs){
+  if(!spec.layers||!spec.layers.length){errs.push('layers가 비어 있음');return;}
+  const box=hdiv('layers');
+  spec.layers.forEach((ly,i)=>{
+    if(i&&spec.arrows!==false){hdiv('layer-sep',box).textContent='▼';}
+    const l=hdiv('layer',box);
+    hdiv('layer-label',l).textContent=ly.label||'';
+    const items=hdiv('layer-items',l);
+    (ly.items||[]).forEach(it=>{
+      const c=document.createElement('span');
+      c.className='chip'+((it.ref||it.def)?' has-ref':'');
+      c.textContent=it.label;
+      const tip=[it.def,it.ref].filter(Boolean).join('\n');
+      if(tip)c.title=tip;
+      items.appendChild(c);
+    });
+  });
+  mount(fig,box);
+}
+
+/* ---------- bar / donut ---------- */
+function renderBar(fig,spec,warns,errs){
+  const items=spec.items||[];
+  if(!items.length){errs.push('items가 비어 있음');return;}
+  const max=spec.max||Math.max(...items.map(i=>i.value));
+  const box=hdiv('bars');
+  items.forEach(it=>{
+    const row=hdiv('bar-row',box);
+    hdiv('bar-label',row).textContent=it.label;
+    const track=hdiv('bar-track',row);
+    const fill=hdiv('bar-fill',track);
+    fill.style.width=Math.max(0,Math.min(100,it.value/max*100))+'%';
+    hdiv('bar-val',row).textContent=it.value+(spec.unit||'');
+  });
+  mount(fig,box);
+}
+function renderDonut(fig,spec,warns,errs,uid){
+  const items=spec.items||[];
+  const total=items.reduce((a,i)=>a+i.value,0);
+  if(!items.length||total<=0){errs.push('items가 비어 있거나 합이 0');return;}
+  const box=hdiv('donut-wrap');
+  const R=52,C=2*Math.PI*R;
+  const svg=el('svg',{viewBox:'0 0 150 150',width:150,height:150,role:'img'},box);
+  let acc=0;
+  items.forEach((it,i)=>{
+    const frac=it.value/total;
+    const c=el('circle',{cx:75,cy:75,r:R,fill:'none','stroke-width':26,
+      'stroke-dasharray':`${frac*C} ${C}`,'stroke-dashoffset':-acc*C,
+      transform:'rotate(-90 75 75)'},svg);
+    c.style.stroke=`var(--c${(i%8)+1})`;
+    acc+=frac;
+  });
+  const lg=hdiv('legend',box);
+  items.forEach((it,i)=>{
+    const row=hdiv('legend-row',lg);
+    const dot=hdiv('legend-dot',row);
+    dot.style.background=`var(--c${(i%8)+1})`;
+    const span=document.createElement('span');
+    span.textContent=`${it.label} — ${Math.round(it.value/total*100)}%`;
+    row.appendChild(span);
+  });
+  mount(fig,box);
+}
+
+/* ---------- frames: 자료구조·알고리즘 진행 과정을 프레임별로 탐색 ---------- */
+function renderFrames(fig,spec,warns,errs,uid){
+  const frames=spec.frames||[];
+  if(frames.length<2){errs.push('frames는 프레임 2개 이상 필요');return;}
+  if(frames.length>10)warns.push(`프레임 ${frames.length}개 — 10개 이하 권장`);
+  const R={flow:renderFlow,state:renderFlow,sequence:renderSeq,tree:renderTree,layers:renderLayers,bar:renderBar,donut:renderDonut};
+  const hosts=[];
+  frames.forEach((f,i)=>{
+    const sub=f.spec||{};
+    const fn=R[sub.type];
+    if(!fn){errs.push(`프레임 ${i+1}: 알 수 없는 type "${sub.type}"`);return;}
+    const host=hdiv('frame');
+    host.style.display='none';
+    try{fn(host,sub,warns,errs,uid*100+i);}
+    catch(e){errs.push(`프레임 ${i+1} 렌더링 오류: `+e.message);}
+    hosts.push(host);
+    mount(fig,host);
+  });
+  if(errs.length||hosts.length<2)return;
+  const bar=hdiv('steps');
+  const mk=t=>{const b=document.createElement('button');b.textContent=t;bar.appendChild(b);return b;};
+  const prev=mk('◀ 이전');
+  const ind=document.createElement('span');ind.className='step-ind';bar.appendChild(ind);
+  const next=mk('다음 ▶');
+  mount(fig,bar);
+  const note=hdiv('step-note');
+  mount(fig,note);
+  let idx=0;
+  const show=()=>{
+    hosts.forEach((h,i)=>h.style.display=i===idx?'':'none');
+    ind.textContent=`${idx+1}/${hosts.length}`;
+    const txt=frames[idx].note||frames[idx].label||'';
+    note.className='step-note'+(txt?'':' empty');
+    note.textContent=txt;
+  };
+  prev.addEventListener('click',()=>{if(idx>0)idx--;show();});
+  next.addEventListener('click',()=>{if(idx<hosts.length-1)idx++;show();});
+  show();
+}
+
+/* ---------- 인터랙션: hover 하이라이트 ---------- */
+function initHover(fig,svg){
+  svg.querySelectorAll('.node').forEach(node=>{
+    const id=node.dataset.id;
+    node.addEventListener('mouseenter',()=>{
+      if(fig.classList.contains('stepping'))return;
+      fig.classList.add('hovering');
+      const linked=new Set([id]);
+      svg.querySelectorAll('.edge[data-from],.edge[data-to]').forEach(e=>{
+        const hit=e.dataset.from===id||e.dataset.to===id;
+        e.classList.toggle('faded',!hit);
+        if(hit){linked.add(e.dataset.from);linked.add(e.dataset.to);}
+      });
+      svg.querySelectorAll('.node').forEach(n=>n.classList.toggle('faded',!linked.has(n.dataset.id)));
+    });
+    node.addEventListener('mouseleave',()=>{
+      fig.classList.remove('hovering');
+      svg.querySelectorAll('.faded').forEach(n=>n.classList.remove('faded'));
+    });
+  });
+}
+
+/* ---------- 인터랙션: step-through ---------- */
+function initSteps(fig,uid){
+  if(!fig.hasAttribute('data-step-through'))return;
+  const items=[...fig.querySelectorAll('.edge[data-i]')].sort((a,b)=>+a.dataset.i-+b.dataset.i);
+  if(items.length<2)return;
+  const bar=hdiv('steps');
+  const mkBtn=t=>{const b=document.createElement('button');b.textContent=t;bar.appendChild(b);return b;};
+  const prev=mkBtn('◀ 이전');
+  const ind=document.createElement('span');ind.className='step-ind';ind.textContent='전체';bar.appendChild(ind);
+  const next=mkBtn('다음 ▶');
+  const reset=mkBtn('처음부터');
+  mount(fig,bar);
+  /* 단계별 부가 설명 패널 — note가 하나라도 있을 때만 생성 */
+  const hasNotes=items.some(e=>e.dataset.note);
+  let noteBox=null;
+  if(hasNotes){
+    noteBox=hdiv('step-note hint');
+    noteBox.textContent='다음 ▶ 를 누르면 단계별 설명과 함께 진행됩니다';
+    mount(fig,noteBox);
+  }
+  let idx=-1;
+  const apply=()=>{
+    fig.classList.toggle('stepping',idx>=0);
+    items.forEach((e,i)=>{
+      e.classList.toggle('hot',i===idx);
+      e.classList.toggle('dim',idx>=0&&i>idx);
+      const p=e.querySelector('.epath');
+      if(p)p.setAttribute('marker-end',`url(#${i===idx?'arwh':'arw'}-${uid})`);
+    });
+    fig.querySelectorAll('.node,.lifeline').forEach(n=>n.classList.remove('hot'));
+    if(idx>=0){
+      const e=items[idx];
+      [e.dataset.from,e.dataset.to].forEach(id=>{
+        if(!id)return;
+        fig.querySelectorAll(`[data-id="${CSS.escape(id)}"]`).forEach(n=>n.classList.add('hot'));
+      });
+    }
+    ind.textContent=idx<0?'전체':`${idx+1}/${items.length}`;
+    if(noteBox){
+      if(idx<0){
+        noteBox.className='step-note hint';
+        noteBox.textContent='다음 ▶ 를 누르면 단계별 설명과 함께 진행됩니다';
+      }else{
+        const n=items[idx].dataset.note;
+        noteBox.className='step-note'+(n?'':' empty');
+        noteBox.textContent=n||'';
+      }
+    }
+  };
+  prev.addEventListener('click',()=>{if(idx>=0)idx--;apply();});
+  next.addEventListener('click',()=>{if(idx<items.length-1)idx++;apply();});
+  reset.addEventListener('click',()=>{idx=-1;apply();});
+}
+
+/* ---------- 진입점 ---------- */
+let _uid=0;
+document.querySelectorAll('[data-diagram]').forEach(fig=>{
+  const uid=++_uid;
+  const scriptEl=fig.querySelector('script[type="application/json"]');
+  if(!scriptEl){banner(fig,['JSON 스펙 블록(<script type="application/json">)이 없습니다.'],'error');return;}
+  let spec;
+  try{spec=JSON.parse(scriptEl.textContent);}
+  catch(e){banner(fig,['JSON 파싱 실패: '+e.message],'error');return;}
+  const warns=[],errs=[];
+  const R={flow:renderFlow,state:renderFlow,sequence:renderSeq,tree:renderTree,layers:renderLayers,bar:renderBar,donut:renderDonut,frames:renderFrames};
+  const fn=R[spec.type];
+  if(!fn){banner(fig,[`알 수 없는 다이어그램 type: "${spec.type}" (flow/state/sequence/tree/layers/bar/donut/frames)`],'error');return;}
+  try{fn(fig,spec,warns,errs,uid);}
+  catch(e){errs.push('렌더링 내부 오류: '+e.message);}
+  if(errs.length)banner(fig,errs,'error');
+  else if(warns.length)banner(fig,warns,'warn');
+});
+
+/* ---------- 목차 (사이드바 + 좁은 화면 드롭다운 + 스크롤스파이) ---------- */
+(function(){
+  const toc=document.getElementById('toc');
+  const btn=document.getElementById('toc-btn');
+  const units=[...document.querySelectorAll('section.unit')];
+  const linked=[];
+  units.forEach((s,i)=>{
+    const h=s.querySelector('h2');
+    if(!h)return;
+    if(!s.id)s.id='unit-'+(i+1);
+    const a=document.createElement('a');
+    a.href='#'+s.id;
+    a.textContent=h.textContent;
+    toc.appendChild(a);
+    linked.push({sec:s,a:a});
+  });
+  btn.addEventListener('click',e=>{e.stopPropagation();document.body.classList.toggle('toc-open');});
+  toc.addEventListener('click',()=>document.body.classList.remove('toc-open'));
+  document.addEventListener('click',e=>{
+    if(document.body.classList.contains('toc-open')&&!toc.contains(e.target))
+      document.body.classList.remove('toc-open');
+  });
+  /* 현재 읽는 섹션을 목차에서 강조 — 스크롤 위치 기반.
+     (IntersectionObserver 방식은 마지막 섹션이 짧으면 관찰 밴드에 못 들어와 강조가 빠짐) */
+  const spy=()=>{
+    if(!linked.length)return;
+    let cur=0;
+    const probe=window.scrollY+window.innerHeight*0.3;
+    linked.forEach((l,i)=>{if(l.sec.offsetTop<=probe)cur=i;});
+    if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-4)
+      cur=linked.length-1;
+    linked.forEach((l,i)=>l.a.classList.toggle('active',i===cur));
+  };
+  /* rAF는 백그라운드 탭에서 멈추므로 직접 호출 (섹션 수가 적어 비용 미미) */
+  addEventListener('scroll',spy,{passive:true});
+  addEventListener('resize',spy,{passive:true});
+  spy();
+})();
+
+/* ---------- 테마 토글 ---------- */
+(function(){
+  const btn=document.getElementById('theme-btn');
+  const root=document.documentElement;
+  const saved=localStorage.getItem('learn-theme');
+  if(saved)root.setAttribute('data-theme',saved);
+  const label=()=>{
+    const cur=root.getAttribute('data-theme')||
+      (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+    btn.textContent=cur==='dark'?'☀':'☾';
+  };
+  btn.addEventListener('click',()=>{
+    const cur=root.getAttribute('data-theme')||
+      (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+    const nxt=cur==='dark'?'light':'dark';
+    root.setAttribute('data-theme',nxt);
+    localStorage.setItem('learn-theme',nxt);
+    label();
+  });
+  label();
+})();
+</script>
+</body>
+</html>

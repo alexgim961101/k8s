@@ -9,7 +9,8 @@
 직접 만든 온프렘 클러스터와 매니지드 EKS를 비교하며, **무엇이 내 책임에서 사라지고 무엇이 새로
 생기는지** 몸으로 안다. 그리고 `kubectl apply` 를 손으로 치지 않는 배포 체계를 만든다.
 
-기존 [`../IaC`](../../IaC) 저장소의 `aws/modules`, `aws/environments` 구조를 그대로 따른다.
+실습 Terraform 코드는 이 저장소의 [`labs/terraform-eks/`](labs/terraform-eks/)에 남긴다.
+운영 IaC로 옮길 때만 해당 저장소의 모듈·환경 구조에 맞춰 재구성한다.
 
 ## 이론
 
@@ -37,8 +38,13 @@
 
 ## 실습 (labs/)
 
+먼저 [Terraform EKS 한 단계씩 실습](labs/terraform-eks-workshop.md)을 수행한다. 실습 코드는
+`labs/terraform-eks/`에 직접 입력해 Git으로 남기고, 계정별 값·state만 제외한다.
+**각 코드 블록과 명령을 한 번에 하나씩 직접 입력하고, 바로 아래의 확인 명령이 기대한
+결과를 내는지 확인한 뒤에만 다음 단계로 진행한다.**
+
 **W13**
-- 기존 IaC 저장소 구조에 `eks` 모듈을 추가해 Terraform으로 클러스터 생성
+- 이 저장소의 `labs/terraform-eks/`에 `network`·`eks` 모듈을 직접 작성해 클러스터 생성
 - 관통 프로젝트를 EKS에 배포하고 ALB로 외부 노출 + HTTPS
 - IRSA로 앱에 S3 접근 권한 부여 (액세스 키 없이)
 - `terraform destroy` → `apply` 로 전체 재현
