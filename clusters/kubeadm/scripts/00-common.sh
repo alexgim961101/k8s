@@ -145,6 +145,9 @@ if [[ ! -x /usr/local/bin/containerd ]]; then
 fi
 /usr/local/bin/containerd --version
 
+# systemd 유닛 디렉터리가 없는 배포판이 있다. mkdir 없이 리다이렉트하면
+# curl 이 "(23) Failure writing output to destination" 으로 실패한다.
+mkdir -p /usr/local/lib/systemd/system
 curl -fsSL "https://raw.githubusercontent.com/containerd/containerd/${CONTAINERD_VERSION}/containerd.service" \
   -o /usr/local/lib/systemd/system/containerd.service
 
@@ -268,13 +271,19 @@ apt-get install -y -qq kubelet kubeadm kubectl >/dev/null
 # 업그레이드는 전용 절차(kubeadm upgrade)를 따라야 하므로 자동 업그레이드에서 제외한다.
 apt-mark hold kubelet kubeadm kubectl >/dev/null
 
-# kubelet은 kubeadm이 지시를 줄 때까지 crashloop에 빠진다. 정상이며 지금은 켜지 않는다.
-# 단 이미 클러스터에 참여한 노드라면 절대 멈추지 않는다.
+# kubelet 은 enable 해둔다.
+#   - 설치 직후에는 kubeadm 이 설정을 주기 전까지 crashloop 에 빠지는 것이 정상이다.
+#   - ⚠️ disable 하면 안 된다. 재부팅 시 kubelet 이 올라오지 않아
+#     컨트롤 플레인 static pod 도 함께 사라지고 클러스터가 통째로 죽는다.
+#     (kubeadm 이 나중에 kubelet 을 enable 한다는 보장이 없다)
+#   - 이미 클러스터에 참여한 노드라면 재시작하지 않는다.
+systemctl enable kubelet >/dev/null 2>&1 || true
 if [[ $NODE_IN_CLUSTER -eq 1 ]]; then
   echo "kubelet 유지 (클러스터 참여 중): $(systemctl is-active kubelet)"
 else
-  systemctl stop kubelet >/dev/null 2>&1 || true
-  systemctl disable kubelet >/dev/null 2>&1 || true
+  # crashloop 이 정상이므로 지금 시작할 필요는 없다. kubeadm 이 시작시킨다.
+  # 다만 enable 은 해두어야 재부팅 후 살아난다.
+  echo "kubelet enable 완료 (kubeadm 이 시작시킨다)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -287,6 +296,7 @@ echo "kubeadm    : $(kubeadm version -o short)"
 echo "kubelet    : $(kubelet --version | awk '{print $2}')"
 echo "kubectl    : $(kubectl version --client -o json | jq -r .clientVersion.gitVersion)"
 echo "crictl     : $(crictl --version | awk '{print $NF}')"
+echo "kubelet svc: $(systemctl is-enabled kubelet 2>/dev/null || echo '?') (enabled 여야 재부팅 후 살아난다)"
 echo "swap       : $(swapon --show --noheadings | wc -l | tr -d ' ') 개 (0이어야 정상)"
 
 cat <<'NEXT'

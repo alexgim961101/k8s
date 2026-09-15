@@ -12,7 +12,7 @@ k8s_remote_script_dir: /tmp/k8s-setup
 
 # --- 컨트롤 플레인 ---
 k8s_cluster_name: k8s-study
-k8s_pod_cidr: 10.244.0.0/16      # Calico 기본값(192.168.0.0/16)은 UTM/Multipass 대역과 겹친다
+k8s_pod_cidr: 10.244.0.0/16      # Calico 기본값(192.168.0.0/16)은 Multipass/UTM 대역과 겹친다
 
 # 비우면 스크립트가 이 노드의 IP를 자동 감지한다.
 # HA로 확장할 계획이면 처음부터 로드밸런서 주소를 넣는다 (인증서 SAN에 박힌다).

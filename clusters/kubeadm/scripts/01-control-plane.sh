@@ -14,7 +14,7 @@
 set -euo pipefail
 
 CLUSTER_NAME="k8s-study"
-POD_CIDR="10.244.0.0/16"      # Calico 기본값(192.168.0.0/16)은 UTM/Multipass VM 대역과 겹친다. 반드시 호스트 대역을 피한다.
+POD_CIDR="10.244.0.0/16"      # Calico 기본값(192.168.0.0/16)은 Multipass/UTM 노드 대역과 겹친다. 반드시 호스트 대역을 피한다.
 CONTROL_PLANE_ENDPOINT=""      # 비우면 이 노드의 IP를 자동 감지
 APISERVER_ADVERTISE_ADDRESS="" # 비우면 자동 감지
 KUBERNETES_VERSION=""          # 비우면 kubeadm이 설치된 버전을 사용. HA 확장 시 명시하는 편이 좋다.
@@ -151,9 +151,14 @@ export KUBECONFIG=/etc/kubernetes/admin.conf
 if [[ $SKIP_CNI -eq 0 ]]; then
   log "Calico $CALICO_VERSION 설치 (operator 방식)"
 
-  # CRD → operator → IPPool 순서. operator가 먼저 뜨면 CRD를 인식하지 못한다.
-  kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/v1_crd_projectcalico_org.yaml"
-  kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml"
+  # 순서: CRDs → operator → Installation CR. operator가 먼저 뜨면 CRD를 인식하지 못한다.
+  #
+  # ⚠️ create 를 쓴다. apply 는 객체 전체를 kubectl.kubernetes.io/last-applied-configuration
+  #    annotation 에 넣는데, CRD 가 크면 262144 바이트 한도를 넘어
+  #    "metadata.annotations: Too long" 으로 실패한다.
+  #    (Calico 공식 문서도 create 를 쓴다. 재실행이 필요하면 이미 존재한다는 에러만 나고 무해하다.)
+  kubectl create -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/v1_crd_projectcalico_org.yaml"
+  kubectl create -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml"
 
   # 기본 매니페스트의 IPPool CIDR(192.168.0.0/16)을 --pod-cidr 값으로 맞춘다.
   # kubeadm --pod-subnet 과 Calico IPPool CIDR은 반드시 같아야 한다.

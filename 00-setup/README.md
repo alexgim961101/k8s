@@ -131,17 +131,34 @@ kind create cluster --config ../clusters/kind/study-cluster.yaml
 
 "부숴도 5분이면 돌아온다"는 확신이 있어야 이후 단계에서 과감하게 실험할 수 있다.
 
-같은 훈련을 **VM + kubeadm**으로도 반복한다. 이쪽은 클러스터 수명주기 자체가 학습 대상이고,
+같은 훈련을 **Multipass VM + kubeadm**으로도 반복한다. 이쪽은 클러스터 수명주기 자체가 학습 대상이고,
 [04-onprem-cka](../04-onprem-cka/) W11의 예행연습이 된다.
 
 ```bash
-# 설치 (VM 안에서) — 두 VM 공통 → 컨트롤 플레인 → 워커 → 검증
-sudo ~/scripts/00-common.sh
-sudo ~/scripts/01-control-plane.sh
-sudo ~/scripts/02-worker.sh "kubeadm join ..."
-~/scripts/03-verify.sh
+cd clusters/kubeadm/scripts
 
-# 해체 → 재구축 (호스트에서, Ansible)
+# VM 생성 (호스트) — 네트워크와 CIDR 충돌까지 검사한다
+./00-create-vms.sh
+
+# 공통 설치 (모든 노드)
+for n in k8s-cp1 k8s-w1; do multipass exec $n -- sudo bash /home/ubuntu/00-common.sh; done
+
+# 컨트롤 플레인 → 워커 → 검증
+multipass exec k8s-cp1 -- sudo bash /home/ubuntu/01-control-plane.sh
+JOIN=$(multipass exec k8s-cp1 -- sudo kubeadm token create --print-join-command)
+multipass exec k8s-w1 -- sudo bash /home/ubuntu/02-worker.sh "$JOIN"
+multipass exec k8s-cp1 -- sudo bash /home/ubuntu/03-verify.sh
+```
+
+전체 **약 5분**이다(M4 Mac 기준). 가장 빠른 반복 훈련은 VM을 지우고 다시 만드는 것이다:
+
+```bash
+multipass delete --purge k8s-cp1 k8s-w1 && ./00-create-vms.sh
+```
+
+### 해체 → 재구축 (VM은 유지, Ansible)
+
+```bash
 cd clusters/kubeadm/ansible
 ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
 ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml

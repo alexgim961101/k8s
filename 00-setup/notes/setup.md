@@ -16,16 +16,16 @@
 | helm | 차트 배포 | 00 설치, 03부터 본격 사용 |
 | k9s | 클러스터 TUI 탐색 | 00 |
 | stern | 다중 Pod 로그 추적 | 00 |
-| multipass | 온프렘 VM | **04에서 설치** (지금은 불필요) |
-| UTM | VM 실행 (macOS) | 클러스터를 VM에 올릴 때 — [kubeadm-setup.md](kubeadm-setup.md) |
+| multipass | 온프렘 VM (kubeadm 노드) | **00** — `brew install --cask multipass` |
 | ansible | kubeadm 노드 준비 자동화 | 클러스터 해체→재구축 반복 시 ([`clusters/kubeadm/ansible`](../../clusters/kubeadm/ansible/)) |
 
 kustomize는 kubectl에 내장(`kubectl kustomize`)되어 별도 설치하지 않는다.
 
-> kind로 로컬 클러스터를 만드는 것과 별개로, **UTM VM 2대를 kubeadm으로 클러스터화**하는 절차와
+> kind로 로컬 클러스터를 만드는 것과 별개로, **Multipass VM 2대를 kubeadm으로 클러스터화**하는 절차와
 > 그 이유는 [kubeadm-setup.md](kubeadm-setup.md)에 정리했다(kind 노드도 kubeadm 구성이라 구조가 같다).
 > 실행 명령은 [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md)에 있다.
 > kind와 달리 노드 준비 단계가 새로 생기며, 04단계 W11의 사전 연습에 해당한다.
+> **macOS M4 + Multipass 1.16.3에서 실제로 구축하고 검증했다**(검증 18/0, 재부팅 내구성 포함).
 
 ---
 

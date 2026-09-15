@@ -6,9 +6,9 @@
 clusters/
 ├── kind/
 │   └── study-cluster.yaml    # 3노드 로컬 클러스터 (00단계부터 계속 사용)
-└── kubeadm/                  # 04단계의 기반 — UTM VM 위 kubeadm 클러스터
-    ├── README.md             # 구축 절차와 트러블슈팅
-    ├── scripts/              # VM 안에서 실행하는 설치 스크립트 (공통/CP/워커/검증)
+└── kubeadm/                  # 04단계의 기반 — Multipass VM 위 kubeadm 클러스터
+    ├── README.md             # 구축 절차와 트러블슈팅 (실측 검증됨)
+    ├── scripts/              # 00-create-vms.sh(호스트) + 00~03 (노드 안)
     └── ansible/              # 호스트에서 실행하는 반복 훈련용 플레이북
 ```
 
@@ -35,16 +35,16 @@ kubectl label node study-control-plane ingress-ready=true
 
 ## kubeadm (04단계)
 
-UTM 또는 Multipass로 VM을 띄우고, 스크립트(`scripts/`) 또는 Ansible(`ansible/`)로 kubeadm 클러스터를 구축한다.
-자세한 절차는 [`kubeadm/README.md`](kubeadm/README.md) 참조.
-
-VM 생성 명령은 두 머신(Ubuntu / macOS)에서 동일하다.
+**Multipass**로 VM을 띄우고, 스크립트(`scripts/`) 또는 Ansible(`ansible/`)로 kubeadm 클러스터를 구축한다.
+자세한 절차는 [`kubeadm/README.md`](kubeadm/README.md) 참조 (macOS M4에서 실제 구축·검증했다).
 
 ```bash
-multipass launch --name cp1   --cpus 2 --memory 4G --disk 20G 24.04
-multipass launch --name node1 --cpus 2 --memory 4G --disk 20G 24.04
-multipass launch --name node2 --cpus 2 --memory 4G --disk 20G 24.04
+cd clusters/kubeadm/scripts
+./00-create-vms.sh          # VM 생성 + 네트워크/CIDR 검증 (호스트에서)
+# 이후 00~03 을 노드에서 실행 — kubeadm/README.md 참조
 ```
 
-> UTM을 쓴다면 네트워크 모드를 **Bridged**로 두어야 VM끼리 IP로 통신하고 호스트에서 SSH로 접속할 수 있다.
+> **Multipass 기본 NAT 모드로 충분하다.** 노드 간 통신과 크로스노드 Pod 통신(Calico VXLAN)이
+> 모두 동작하고, MAC이 고정되어 재부팅해도 IP가 유지된다 — 실측 확인했다.
+> UTM은 `utmctl`에 `create`가 없어 VM 생성 자동화가 불가능하므로 이 리포는 Multipass를 쓴다.
 > VM과 클러스터는 각 머신에서 새로 만든다. Git으로는 **재현 가능한 코드와 문서만** 동기화한다.

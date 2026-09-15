@@ -103,23 +103,34 @@ fi
 
 # ---------------------------------------------------------------------------
 head_ "5. 노드 간 필수 포트"
-#
-# 워커에서 컨트롤 플레인으로 열려 있어야 하는 포트.
-# kubelet이 자기 자신의 노드 IP로 접속해 확인하므로 노드가 여러 개면 실제 확인이 된다.
 # ---------------------------------------------------------------------------
+# 6443(kube-apiserver)은 컨트롤 플레인에만 있다. 워커에 요구하면 안 된다.
+# 10250(kubelet API)은 모든 노드에 있다.
+# ---------------------------------------------------------------------------
+cp_nodes="$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}')"
 node_ips="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}')"
-for ip in $node_ips; do
+[[ -z "$cp_nodes" ]] && cp_nodes="$node_ips"
+
+for ip in $cp_nodes; do
   if nc -z -w2 "$ip" 6443 2>/dev/null; then
-    ok "$ip:6443 (kube-apiserver) 도달"
+    ok "$ip:6443 (kube-apiserver) 도달 — 컨트롤 플레인"
   else
-    bad "$ip:6443 도달 실패"
+    bad "$ip:6443 도달 실패 — 컨트롤 플레인인데 apiserver 가 안 듣는다"
   fi
+done
+
+for ip in $node_ips; do
   if nc -z -w2 "$ip" 10250 2>/dev/null; then
     ok "$ip:10250 (kubelet API) 도달"
   else
-    warn "$ip:10250 도달 실패 (방화벽 확인)"
+    bad "$ip:10250 도달 실패 — kubelet 또는 방화벽 확인"
   fi
 done
+
+# 워커에서 컨트롤 플레인의 apiserver 로 실제 접속되는지 (join 이 된 이유)
+if kubectl get nodes -l '!node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | grep -q .; then
+  ok "워커 노드가 등록됨 — 컨트롤 플레인 $(echo "$cp_nodes" | head -1):6443 접속 확인됨"
+fi
 
 # ---------------------------------------------------------------------------
 if [[ $SKIP_NETWORK_TEST -eq 0 ]]; then

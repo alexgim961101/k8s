@@ -1,6 +1,7 @@
 # kubeadm 클러스터 구축 — 개념 정리
 
-> 확인 시점: 2026-09 / Kubernetes **v1.37.0**, containerd v2.3.5, Calico v3.32.2
+> 검증: 2026-09 · macOS(Apple Silicon) / Multipass 1.16.3 / Ubuntu 24.04.5
+> Kubernetes **v1.37.0**, containerd v2.3.5, Calico v3.32.2 — **실제로 구축해 검증했다** (검증 18/0, 재부팅 내구성 포함)
 >
 > **이 문서는 "무엇을 왜 하는가"를 기록하는 노트다.** 명령을 그대로 따라 치는 용도라면
 > [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md)를 본다.
@@ -9,72 +10,83 @@
 
 | 종류 | 위치 | 용도 |
 |---|---|---|
-| 설치 스크립트 | [`clusters/kubeadm/scripts/`](../../clusters/kubeadm/scripts/) | VM 안에서 수동 실행 (00 공통 → 01 CP → 02 워커 → 03 검증) |
+| VM 생성 | [`clusters/kubeadm/scripts/00-create-vms.sh`](../../clusters/kubeadm/scripts/00-create-vms.sh) | **호스트**에서 실행. VM 생성 + 검증 |
+| 설치 스크립트 | [`clusters/kubeadm/scripts/`](../../clusters/kubeadm/scripts/) (나머지) | 노드 안에서 수동 실행 (00 공통 → 01 CP → 02 워커 → 03 검증) |
 | Ansible | [`clusters/kubeadm/ansible/`](../../clusters/kubeadm/ansible/) | 호스트에서 실행. 반복 훈련(해체→재구축) |
 | 실행 절차 | [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md) | 명령과 옵션, 트러블슈팅 |
 
 이 노트는 그 자산들이 **왜 그렇게 생겼는지**를 설명한다.
 
-## 왜 UTM VM + kubeadm 인가
+## 왜 Multipass + kubeadm 인가
 
 00~03단계는 kind 위에서 논다. kind의 노드는 **kubeadm으로 구성된 컨테이너**라,
 VM 위에 직접 kubeadm을 돌리는 것과 구조가 같다. 다른 점은 다음과 같다.
 
-| | kind | UTM VM + kubeadm |
+| | kind | VM + kubeadm (Multipass) |
 |---|---|---|
 | 노드 | 컨테이너 (호스트 커널 공유) | VM (커널 포함 독립) |
-| 네트워크 | Docker 브리지 | VM 브리지 (외부 IP 보유) |
+| 네트워크 | Docker 브리지 | vmnet NAT — **노드 대역 `192.168.252.0/24`** |
 | 노드 준비 | 이미지에 포함 | **직접 해야 함** (커널·swap·런타임) |
 | 컨트롤 플레인 | static pod (동일) | static pod (동일) |
+| IP 지속성 | 컨테이너 재생성 시 변함 | **MAC 고정 → 재부팅해도 동일 IP** |
 | 용도 | 오브젝트 학습 | 클러스터 수명주기 학습 (CKA) |
 
 → **"노드 준비"라는 단계가 새로 생기는 것**이 핵심 차이다. CKA와 실무에서 사고가 나는 지점도 대부분 여기다.
 
+### 왜 UTM이 아니라 Multipass인가
+
+UTM은 `utmctl`에 `create` 명령이 없어 **VM 생성만은 AppleScript로 직접 짜야 한다.**
+게다가 `exec` / `ip-address` / `file`은 게스트에 `qemu-guest-agent`가 있어야 동작한다.
+
+Multipass는 생성·실행·파일 전송·삭제·스냅샷이 모두 CLI로 되고, 명령 실행에 에이전트가 필요 없다.
+이 차이가 자동화 가능 여부를 갈랐다([`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md#왜-multipass인가)).
+
 ## 전체 순서
 
 ```
-[호스트]  VM 2대 준비, SSH 접속 설정      → clusters/kubeadm/README.md 0장
+[호스트] 00-create-vms.sh    VM 생성 · 스크립트 전송 · 네트워크/CIDR 검증
              │
-[VM 공통] 00-common.sh      커널 모듈 · sysctl · swap · containerd · kubelet/kubeadm/kubectl
+[노드]   00-common.sh        커널 모듈 · sysctl · swap · containerd · kubelet/kubeadm/kubectl
              │
-[CP]      01-control-plane.sh   kubeadm init · kubeconfig · Calico CNI
+[CP]     01-control-plane.sh kubeadm init · kubeconfig · Calico CNI
              │
-[Worker]  02-worker.sh          kubeadm join
+[노드]   02-worker.sh        kubeadm join
              │
-[CP]      03-verify.sh          노드·CNI·DNS·Pod 통신 검증
+[CP]     03-verify.sh        노드·CNI·DNS·Pod 통신 검증
 ```
 
 ---
 
 ## 0단계 — VM 준비
 
-UTM으로 VM 2대를 띄운다. 스크립트는 **Ubuntu 24.04**를 기준으로 작성했다.
+`00-create-vms.sh`가 호스트에서 이 단계를 전부 한다. 스크립트는 **Ubuntu 24.04** 기준이다.
 
 | VM | 역할 | CPU | RAM | Disk |
 |---|---|---|---|---|
-| `k8s-cp` | control-plane | 2 | 4G | 20G |
+| `k8s-cp1` | control-plane | 2 | 4G | 20G |
 | `k8s-w1` | worker | 2 | 4G | 20G |
 
-### UTM에서 주의할 점
+### Multipass 네트워크에서 주의할 점
 
-**네트워크 모드는 `Bridged (Advanced)`.** "Shared Network"은 호스트에서 게스트로 직접 접속할 수 없어
-SSH와 join이 번거로워진다. Bridged로 두면 VM이 공유기에서 IP를 받아 **두 VM이 서로 IP로 통신**할 수 있다.
+**기본 NAT 모드로 충분하다.** 노드 대역은 `192.168.252.0/24`이고(호스트마다 다름),
+- 노드 간 IP 통신 — 실측 확인 (ping 0% loss)
+- **크로스노드 Pod 통신 (Calico VXLAN)** — 실측 확인
+- 호스트 → 노드 SSH — 가능 (`multipass shell` 또는 `ssh ubuntu@<IP>`)
+
+`--bridged`(외부 LAN에 노출)는 불필요하다. 필요해지면 이때 켠다.
+
+**IP는 재부팅해도 유지된다.** MAC이 고정되어 DHCP가 같은 주소를 준다.
+`join` 명령과 kubeconfig에 IP가 박히므로 이 점이 중요하다 — 실측 확인했다.
 
 `product_uuid`가 겹치면 두 번째 노드가 클러스터에 등록되지 않는다. kubeadm은
-hostname/MAC/product_uuid로 노드를 식별하기 때문이다. UTM에서 **VM을 복제**하면 대개 겹치므로,
-복제 대신 각각 설치하거나 복제 후 UUID를 새로 만든다.
-
-**IP를 고정해두는 것을 권한다.** join 명령과 kubeconfig에 IP가 박히고, UTM은 DHCP라
-재부팅 시 IP가 바뀔 수 있다. netplan으로 고정하거나 DHCP 예약을 건다.
+hostname/MAC/product_uuid로 노드를 식별한다. **Multipass는 VM 생성 시 고유 UUID를 주므로
+`--recreate`로 만들면 문제가 없다.** VM을 외부에서 복제해왔다면 확인해야 한다.
 
 ```bash
-hostname                                   # 두 VM이 서로 달라야 한다
-ip -4 addr show                            # 예: 192.168.0.5 / 192.168.0.6
-ping -c1 <상대 IP>                          # 양방향 통신
-sudo cat /sys/class/dmi/id/product_uuid    # VM마다 고유해야 한다
-
-ssh-copy-id ubuntu@192.168.0.5             # 호스트에서
-ssh-copy-id ubuntu@192.168.0.6
+multipass list                             # 이름과 IP
+multipass exec k8s-cp1 -- hostname         # 노드마다 달라야 한다
+multipass exec k8s-cp1 -- cat /sys/class/dmi/id/product_uuid   # 고유해야 한다
+multipass exec k8s-cp1 -- ping -c1 <상대 IP>   # 노드 간 통신
 ```
 
 ---
@@ -189,6 +201,16 @@ grep sandbox_image /etc/containerd/config.toml
 - 설치 직후 **kubelet을 켜면 crashloop에 빠진다.** kubeadm이 지시를 주기 전까지는 정상이며,
   로그에 `failed to load kubelet config file`이 반복된다. 겁먹지 않아도 된다.
 
+> ⚠️ **kubelet을 `disable`하면 안 된다.** 설치 직후 kubelet이 불필요해 보여도
+> `systemctl disable kubelet`을 하면 **재부팅 후 클러스터가 통째로 죽는다.**
+> kubelet이 안 뜨면 컨트롤 플레인의 static pod도 함께 사라지고, kubeadm이 나중에
+> 대신 enable해주지도 않는다. 실제 구축 중 이 문제로 재부팅 후 클러스터가 죽는 것을 확인했다.
+> → **`systemctl enable kubelet`** 해두고, 시작은 kubeadm에 맡긴다.
+>
+> ```bash
+> systemctl is-enabled kubelet    # enabled 여야 한다
+> ```
+
 ---
 
 ## 2단계 — 컨트롤 플레인 (CP VM에서만)
@@ -275,22 +297,31 @@ CNI가 없으면 **노드가 `NotReady`이고 CoreDNS도 뜨지 않는다.**
 Calico 설치 순서 — **CRD → operator → Installation CR**:
 
 ```bash
-kubectl apply -f .../v1_crd_projectcalico_org.yaml
-kubectl apply -f .../tigera-operator.yaml
+# apply 가 아니라 create 를 쓴다
+kubectl create -f .../v1_crd_projectcalico_org.yaml
+kubectl create -f .../tigera-operator.yaml
 kubectl apply -f custom-resources.yaml   # Installation CR
 watch kubectl get tigerastatus
 ```
 
 > operator가 CRD보다 먼저 뜨면 `Installation` CR을 인식하지 못한다.
 
+> ⚠️ **CRD는 `apply`가 아니라 `create`로 넣어야 한다** (실제 구축 중 발견).
+> `kubectl apply`는 객체 전체를 `kubectl.kubernetes.io/last-applied-configuration`
+> annotation에 넣는다. Calico CRD는 본문이 커서 annotation 한도(262144바이트)를 넘고
+> `metadata.annotations: Too long`으로 실패한다. Calico 공식 문서도 `create`를 쓴다.
+> 재실행하면 "AlreadyExists"만 나고 무해하다.
+
 **⚠️ CIDR 충돌 주의**
 
 Calico 기본 매니페스트의 IPPool CIDR은 **`192.168.0.0/16`** 이다.
-UTM/Multipass VM이 `192.168.0.0/24` 대역을 쓰면 **Pod 네트워크가 호스트 네트워크와 겹친다.**
-겹치면 `kube-proxy` 규칙과 라우팅이 엉켜 통신이 조용히 깨진다(에러 없이 timeout).
+Multipass 노드 대역(`192.168.252.0/24`)과 UTM 기본 대역(`192.168.0.0/24`, `192.168.64.0/24`)이
+모두 이 안에 들어간다. **Pod 네트워크가 노드 네트워크와 겹치면** `kube-proxy` 규칙과 라우팅이 엉켜
+통신이 조용히 깨진다(에러 없이 timeout).
 
-→ `kubeadm`의 `podSubnet`과 **Calico IPPool CIDR을 같게** 맞추고, 둘 다 호스트 대역을 피한다.
-   스크립트는 기본값을 `10.244.0.0/16`으로 잡고 IPPool에 그대로 주입한다.
+→ `kubeadm`의 `podSubnet`과 **Calico IPPool CIDR을 같게** 맞추고, 둘 다 노드 대역을 피한다.
+   스크립트는 기본값을 `10.244.0.0/16`으로 잡고 IPPool에 그대로 주입하며,
+   `00-create-vms.sh`가 **VM 생성 직후 충돌을 미리 검사**한다.
 
 ```bash
 kubectl get ippool -o yaml | grep cidr     # 실제 적용 확인
@@ -366,8 +397,8 @@ kubectl describe node k8s-w1 | sed -n '/Conditions/,/Addresses/p'
 Ansible로 자동화해둔다 ([`clusters/kubeadm/ansible/`](../../clusters/kubeadm/ansible/)).
 
 ```bash
+# 인벤토리는 00-create-vms.sh 가 자동 생성한다 (IP를 직접 채울 필요 없다)
 cd clusters/kubeadm/ansible
-cp inventory/hosts.ini.example inventory/hosts.ini && $EDITOR inventory/hosts.ini
 
 ansible-playbook -i inventory/hosts.ini playbooks/01-prepare-nodes.yml
 ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml
@@ -378,6 +409,8 @@ ansible-playbook -i inventory/hosts.ini playbooks/verify.yml
 # 해체
 ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
 ```
+
+> VM 을 아예 지우고 처음부터 하는 편이 더 빠르다 — `multipass delete --purge k8s-cp1 k8s-w1 && ../scripts/00-create-vms.sh`
 
 ### kubeadm과 Ansible의 역할 분담
 
@@ -397,12 +430,14 @@ ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
 
 | 증상 | 원인 후보 | 확인 |
 |---|---|---|
-| 노드 `NotReady` | CNI 미설치 | `kubectl get pods -n kube-system` 에 calico-node |
+| 노드 `NotReady` | CNI 미설치 | `kubectl get pods -n calico-system` |
 | 노드 `NotReady` | `ip_forward=0` | `sysctl net.ipv4.ip_forward` |
 | 모든 Pod `Pending` | CNI 없음 / IPPool CIDR 불일치 | `kubectl get tigerastatus`, `kubectl get ippool -o yaml` |
 | kubelet 시작 실패 | swap 활성 | `swapon --show`, `journalctl -u kubelet -n 50` |
 | Pod가 `ContainerCreating` 고정 | sandbox 이미지 pull 실패 | `sudo crictl images \| grep pause` |
 | containerd는 active인데 `NotReady` | 배포판/공식 containerd 충돌 | `readlink -f /proc/$(pgrep -x containerd)/exe` |
+| **재부팅 후 클러스터가 죽음** | **kubelet이 disabled** | `systemctl is-enabled kubelet` → `systemctl enable --now kubelet` |
+| **`metadata.annotations: Too long`** | **Calico를 `apply`로 설치** | `create`를 쓴다 |
 | Pod 간 통신 timeout (에러 없음) | CIDR 충돌 / `br_netfilter` | `sysctl net.bridge.bridge-nf-call-iptables`, `kubectl get ippool` |
 | Service만 안 됨 (Pod IP는 됨) | kube-proxy / iptables | `kubectl get pods -n kube-system \| grep kube-proxy`, `sudo iptables -t nat -L KUBE-SERVICES` |
 | apiserver 무한 재시작 | 인증서 SAN ≠ 실제 접속 IP | `sudo crictl logs $(sudo crictl ps --name kube-apiserver -q)` |
@@ -410,6 +445,12 @@ ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
 | join 토큰 오류 | 24시간 만료 | `kubeadm token create --print-join-command` |
 | CA 해시 불일치 | 다른 클러스터 명령 사용 | 위 `openssl` 명령으로 직접 계산 |
 | 두 번째 노드가 등록 안 됨 | `product_uuid`/hostname 중복 | `sudo cat /sys/class/dmi/id/product_uuid` (양쪽 비교) |
+
+**Multipass 특유의 함정**
+
+- **`multipass exec` + 출력 리다이렉트가 멈춘다** (1.16.3에서 확인).
+  `multipass exec vm -- cmd > /dev/null`은 무한 대기한다. 출력을 변수로 받아 쉘에서 판단한다.
+- **macOS 기본 bash 3.2에는 `declare -A`(연관배열)가 없다.** 스크립트는 bash 3.2에서도 동작하게 작성했다.
 
 **k8s가 안 될 때는 런타임을 직접 본다.** kubelet을 거치지 않으므로 더 원시적인 정보가 나온다.
 
@@ -449,7 +490,7 @@ sudo ipvsadm -C
 
 실제로 겪은 문제를 여기에 덧붙인다. VM을 다시 만들 때 그대로 재사용한다.
 
-<!-- 예: 2026-08-13 UTM / 두 번째 VM 복제 후 join 실패 → product_uuid 중복. VM 새로 생성 -->
+<!-- 예: 2026-09-15 Multipass / 두 번째 VM 이 등록 안 됨 → product_uuid 중복. VM 새로 생성 -->
 
 ---
 

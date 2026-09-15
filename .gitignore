@@ -48,3 +48,6 @@ Thumbs.db
 # 임시
 tmp/
 *.log
+
+# Ansible — 실제 인벤토리 (IP는 환경마다 달라지고 00-create-vms.sh가 생성한다)
+**/inventory/hosts.ini
