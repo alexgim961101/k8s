@@ -49,8 +49,12 @@ multipass launch --name node1 --cpus 2 --memory 4G --disk 20G 24.04
 multipass launch --name node2 --cpus 2 --memory 4G --disk 20G 24.04
 ```
 
-- **기존 Ansible 자산을 활용해 노드 사전 준비를 자동화** → [`clusters/`](../clusters/) 에 플레이북 작성
-- kubeadm으로 3노드 클러스터 구축, CNI 설치
+- **VM 2~3대로 1CP + N worker 구축이 04단계의 최소 구성**이다. 00단계에서 [`clusters/kubeadm`](../clusters/kubeadm/)으로
+  같은 구성을 이미 한 번 세워봤다면, 여기서는 **문서를 보지 않고** 다시 해보는 것이 목표다.
+- 기존 스크립트/Ansible 자산을 활용한 노드 사전 준비 → [`clusters/kubeadm/scripts`](../clusters/kubeadm/scripts/),
+  [`clusters/kubeadm/ansible`](../clusters/kubeadm/ansible/)
+- kubeadm으로 클러스터 구축, CNI 설치, HA 확장까지 같은 자산에서 확장한다
+- 개별 명령을 이해해야 하므로, 스크립트를 실행한 뒤에는 반드시 **한 단계씩 손으로 다시** 해본다
 - MetalLB 설치 후 LoadBalancer 타입 Service 실제 동작 확인
 - 관통 프로젝트를 이 클러스터로 이전
 - HA 실습(cp 3 + worker 2)까지 하려면 워커 메모리를 2G로 낮춰 총 20GB 내로 맞춘다

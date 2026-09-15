@@ -109,6 +109,33 @@ kind create cluster --config ../clusters/kind/study-cluster.yaml
 
 "부숴도 5분이면 돌아온다"는 확신이 있어야 이후 단계에서 과감하게 실험할 수 있다.
 
+### (기록) UTM VM 위 kubeadm 클러스터
+
+kind와 **같은 구조**를 VM 위에 직접 세운다. kind의 노드가 kubeadm으로 구성된 컨테이너이므로,
+여기서 하는 일이 [04-onprem-cka](../04-onprem-cka/) W11의 예행연습이 된다.
+
+- 스크립트: [`clusters/kubeadm/`](../clusters/kubeadm/) — 공통 / 컨트롤 플레인 / 워커 / 검증 + Ansible
+- 설치 기록: [`notes/kubeadm-setup.md`](notes/kubeadm-setup.md) — VM 준비부터 트러블슈팅까지
+
+kind와 달리 **"노드 준비" 단계가 새로 생긴다** (커널 모듈, swap, containerd, cgroup driver).
+여기서 사고가 나면 대부분 조용히 깨지므로(예: `br_netfilter` 누락 → Service만 안 됨),
+"왜 이 설정이 필요한가"를 함께 기록해 두었다.
+
+```bash
+# 호스트 → VM 으로 스크립트 전송 (두 VM 모두)
+scp -r clusters/kubeadm/scripts ubuntu@<CP-IP>:~/
+scp -r clusters/kubeadm/scripts ubuntu@<WORKER-IP>:~/
+
+# 두 VM 공통
+sudo ~/scripts/00-common.sh
+# 컨트롤 플레인
+sudo ~/scripts/01-control-plane.sh
+# 워커 (join 명령은 컨트롤 플레인에서 발급)
+sudo ~/scripts/02-worker.sh "kubeadm join ..."
+# 검증 (컨트롤 플레인)
+~/scripts/03-verify.sh
+```
+
 ## 완료 기준
 
 - [ ] 빈 상태에서 멀티노드 클러스터를 5분 안에 재구축하고 앱 Pod 1개에 접속

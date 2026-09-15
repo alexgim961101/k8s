@@ -1,0 +1,37 @@
+---
+# 클러스터 설치 검증 (scripts/03-verify.sh 실행)
+#
+#   ansible-playbook -i inventory/hosts.ini playbooks/verify.yml
+
+- name: 설치 검증
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  vars:
+    verify_network: true
+
+  tasks:
+    - name: 스크립트 전송
+      ansible.builtin.copy:
+        src: "{{ k8s_scripts_dir }}/"
+        dest: "{{ k8s_remote_script_dir }}/"
+        mode: "0755"
+
+    - name: 03-verify.sh 실행
+      ansible.builtin.command:
+        cmd: "{{ k8s_remote_script_dir }}/03-verify.sh {{ '--skip-network-test' if not verify_network else '' }}"
+        chdir: "{{ k8s_remote_script_dir }}"
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: verify
+      changed_when: false
+      failed_when: false
+
+    - name: 검증 결과
+      ansible.builtin.debug:
+        msg: "{{ verify.stdout_lines }}"
+
+    - name: 검증 실패
+      ansible.builtin.fail:
+        msg: "설치 검증에 실패했다 (exit {{ verify.rc }})"
+      when: verify.rc != 0

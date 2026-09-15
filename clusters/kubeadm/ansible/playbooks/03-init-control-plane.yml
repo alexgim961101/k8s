@@ -1,0 +1,83 @@
+---
+# 컨트롤 플레인 초기화 + CNI 설치 (스크립트 01-control-plane.sh)
+#
+#   ansible-playbook -i inventory/hosts.ini playbooks/03-init-control-plane.yml
+#
+# 여러 대의 컨트롤 플레인을 HA 로 구성할 때는 각 노드에 --control-plane join 을 해야 한다.
+# 3노드 단일 컨트롤 플레인 구성은 이 플레이북 하나로 끝난다.
+
+- name: 컨트롤 플레인 초기화
+  hosts: control_plane
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: 이미 초기화되었는지 확인
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf
+
+    - name: 초기화되어 있음 — 건너뛴다
+      ansible.builtin.debug:
+        msg: "/etc/kubernetes/admin.conf 가 이미 있다. 재구성하려면 kubeadm reset 후 다시 실행한다."
+      when: admin_conf.stat.exists and not k8s_force_reinstall
+
+    - name: 스크립트 전송
+      ansible.builtin.copy:
+        src: "{{ k8s_scripts_dir }}/"
+        dest: "{{ k8s_remote_script_dir }}/"
+        mode: "0755"
+      when: not admin_conf.stat.exists or k8s_force_reinstall
+
+    - name: 01-control-plane.sh 실행
+      ansible.builtin.command:
+        cmd: >-
+          {{ k8s_remote_script_dir }}/01-control-plane.sh
+          --name {{ k8s_cluster_name }}
+          --pod-cidr {{ k8s_pod_cidr }}
+          {{ '--skip-cni' if not k8s_install_cni else '' }}
+          {{ '--endpoint ' + k8s_control_plane_endpoint if k8s_control_plane_endpoint | length > 0 else '' }}
+          {{ '--apiserver-advertise-address ' + k8s_apiserver_advertise_address if k8s_apiserver_advertise_address | length > 0 else '' }}
+        chdir: "{{ k8s_remote_script_dir }}"
+      register: init_result
+      when: not admin_conf.stat.exists or k8s_force_reinstall
+      changed_when: true
+
+    - name: 초기화 출력
+      ansible.builtin.debug:
+        msg: "{{ init_result.stdout_lines | default([]) }}"
+      when: init_result is not skipped
+
+    # join 명령은 나중에 워커를 추가할 때 다시 필요하다. 토큰은 만료되므로
+    # 플레이북을 다시 실행할 때마다 새 토큰으로 갱신해 둔다(멱등하지는 않지만 그래야 유용하다).
+    - name: join 명령 생성
+      ansible.builtin.command: kubeadm token create --print-join-command --ttl {{ k8s_join_token_ttl }}
+      register: join_command
+      changed_when: false
+
+    - name: join 명령 저장
+      ansible.builtin.copy:
+        dest: /root/kubeadm-join-command.sh
+        content: |
+          #!/usr/bin/env bash
+          # 워커 노드에서 root 로 실행한다. 토큰 유효기간: {{ k8s_join_token_ttl }}
+          # (만료되었으면 컨트롤 플레인에서 `kubeadm token create --print-join-command` 로 재발급)
+          {{ join_command.stdout }} --cri-socket unix:///run/containerd/containerd.sock
+        mode: "0700"
+
+    - name: join 명령 출력
+      ansible.builtin.debug:
+        msg:
+          - "워커 노드용 join 명령 (컨트롤 플레인 /root/kubeadm-join-command.sh 에도 저장됨):"
+          - "{{ join_command.stdout }} --cri-socket unix:///run/containerd/containerd.sock"
+
+    - name: 클러스터 상태
+      ansible.builtin.command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: nodes
+      changed_when: false
+
+    - name: 노드 목록
+      ansible.builtin.debug:
+        msg: "{{ nodes.stdout_lines }}"

@@ -1,0 +1,144 @@
+---
+# 클러스터 해체 — 반복 훈련용
+#
+#   ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
+#
+# 워커 → 컨트롤 플레인 순서로 kubeadm reset, 노드 오브젝트 삭제, CNI 잔여물 정리까지 한다.
+# kubelet/containerd 패키지는 남겨둔다(재구축이 목적이므로). 완전히 지우려면 -e remove_packages=true.
+
+- name: 워커 노드 해체
+  hosts: workers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: kubeadm reset
+      ansible.builtin.command: kubeadm reset -f --cri-socket unix:///run/containerd/containerd.sock
+      register: reset_workers
+      changed_when: true
+      failed_when: reset_workers.rc != 0
+
+    - name: iptables 잔여 규칙 정리
+      ansible.builtin.shell: |
+        iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: CNI / kubelet 잔여물 삭제
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /var/lib/kubelet
+        - /etc/kubernetes
+
+- name: 컨트롤 플레인 해체
+  hosts: control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: 노드 오브젝트 삭제
+      ansible.builtin.command: >-
+        kubectl delete node {{ item }}
+        --ignore-not-found
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      loop: "{{ groups['workers'] + groups['control_plane'] }}"
+      changed_when: true
+      failed_when: false
+
+    - name: kubeadm reset
+      ansible.builtin.command: kubeadm reset -f --cri-socket unix:///run/containerd/containerd.sock
+      register: reset_cp
+      changed_when: true
+      failed_when: reset_cp.rc != 0
+
+    - name: iptables / IPVS 잔여 규칙 정리
+      ansible.builtin.shell: |
+        iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X || true
+        command -v ipvsadm >/dev/null && ipvsadm -C || true
+        exit 0
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: CNI / etcd / kubelet 잔여물 삭제
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /etc/kubernetes
+        - /root/kubeadm-config.yaml
+        - /root/kubeadm-join-command.sh
+
+    - name: kubelet 중지
+      ansible.builtin.systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+
+- name: 패키지까지 제거 (옵션)
+  hosts: k8s_nodes
+  become: true
+  gather_facts: false
+  vars:
+    remove_packages: false
+
+  tasks:
+    - name: containerd / kubelet 제거
+      when: remove_packages | bool
+      block:
+        - name: 패키지 제거
+          ansible.builtin.apt:
+            name:
+              - kubelet
+              - kubeadm
+              - kubectl
+            state: absent
+            purge: true
+
+        - name: 패키지 hold 해제
+          ansible.builtin.dpkg_selections:
+            name: "{{ item }}"
+            selection: install
+          loop:
+            - kubelet
+            - kubeadm
+            - kubectl
+
+        - name: 저장소 설정 제거
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/apt/sources.list.d/kubernetes.list
+            - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+            - /etc/crictl.yaml
+            - /usr/local/bin/kubelet
+            - /usr/local/bin/kubeadm
+            - /usr/local/bin/kubectl
+            - /usr/local/bin/crictl
+            - /usr/local/bin/containerd
+            - /usr/local/bin/containerd-shim-runc-v2
+            - /usr/local/bin/ctr
+            - /usr/local/sbin/runc
+
+- name: 완료 안내
+  hosts: control_plane
+  gather_facts: false
+  tasks:
+    - name: 안내
+      ansible.builtin.debug:
+        msg:
+          - "해체 완료. 다시 구축하려면:"
+          - "  ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml"
+          - "  ansible-playbook -i inventory/hosts.ini playbooks/03-init-control-plane.yml"
+          - "  ansible-playbook -i inventory/hosts.ini playbooks/04-join-workers.yml"

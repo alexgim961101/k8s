@@ -1,0 +1,70 @@
+---
+# 모든 노드에 containerd + kubelet/kubeadm/kubectl 을 설치한다. (스크립트 00-common.sh)
+#
+#   ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml
+#
+# 이미 설치된 노드는 건너뛴다. 강제로 다시 하려면 k8s_force_reinstall=true 로 실행한다.
+#   ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml -e k8s_force_reinstall=true
+
+- name: kubeadm / containerd 공통 설치
+  hosts: k8s_nodes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: kubeadm 설치 여부 확인
+      ansible.builtin.command: kubeadm version -o short
+      register: kubeadm_present
+      changed_when: false
+      failed_when: false
+
+    - name: 이미 설치됨 — 건너뛴다
+      ansible.builtin.debug:
+        msg: "kubeadm {{ kubeadm_present.stdout }} 이 이미 설치되어 있다 (건너뜀)"
+      when:
+        - kubeadm_present.rc == 0
+        - not k8s_force_reinstall
+
+    - name: 스크립트 전송
+      ansible.builtin.copy:
+        src: "{{ k8s_scripts_dir }}/"
+        dest: "{{ k8s_remote_script_dir }}/"
+        mode: "0755"
+        owner: root
+        group: root
+      when:
+        - kubeadm_present.rc != 0 or k8s_force_reinstall
+
+    - name: 00-common.sh 실행
+      ansible.builtin.command:
+        cmd: "{{ k8s_remote_script_dir }}/00-common.sh"
+        chdir: "{{ k8s_remote_script_dir }}"
+      environment:
+        K8S_MINOR: "{{ k8s_minor }}"
+      register: common_result
+      when:
+        - kubeadm_present.rc != 0 or k8s_force_reinstall
+      # 스크립트가 자체적으로 상태를 판단하므로 항상 changed 로 본다
+      changed_when: true
+
+    - name: 설치 결과 출력
+      ansible.builtin.debug:
+        msg: "{{ common_result.stdout_lines | default([]) }}"
+      when: common_result is not skipped
+
+    - name: 설치 상태 요약
+      ansible.builtin.shell: |
+        set -e
+        printf '%-12s %s\n' 'hostname' "$(hostname)"
+        printf '%-12s %s\n' 'kubeadm'  "$(kubeadm version -o short)"
+        printf '%-12s %s\n' 'kubelet'  "$(kubelet --version | awk '{print $2}')"
+        printf '%-12s %s\n' 'containerd' "$(containerd --version | awk '{print $3}')"
+        printf '%-12s %s\n' 'swap' "$(swapon --show --noheadings | wc -l)개"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: common_summary
+
+    - name: 요약
+      ansible.builtin.debug:
+        msg: "{{ common_summary.stdout_lines }}"

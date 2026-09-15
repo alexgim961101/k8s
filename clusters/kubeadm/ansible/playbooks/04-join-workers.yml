@@ -1,0 +1,87 @@
+---
+# 워커 노드를 클러스터에 join 한다 (스크립트 02-worker.sh)
+#
+#   ansible-playbook -i inventory/hosts.ini playbooks/04-join-workers.yml
+#
+# join 토큰은 이 플레이북이 컨트롤 플레인에서 새로 발급받아 쓰므로 미리 준비할 것이 없다.
+# 이미 join 된 노드는 건너뛴다.
+
+- name: 워커 노드 join
+  hosts: workers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: 이미 join 되었는지 확인
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: joined
+
+    - name: 이미 join 됨 — 건너뛴다
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} 은 이미 클러스터에 join 되어 있다"
+      when: joined.stat.exists and not k8s_force_reinstall
+
+    - name: 스크립트 전송
+      ansible.builtin.copy:
+        src: "{{ k8s_scripts_dir }}/"
+        dest: "{{ k8s_remote_script_dir }}/"
+        mode: "0755"
+      when: not joined.stat.exists or k8s_force_reinstall
+
+    # 컨트롤 플레인에서 토큰을 발급받아 모든 워커가 같은 값을 쓴다.
+    # run_once + delegate_to 조합으로 대표 노드 한 대에서만 실행된다.
+    - name: join 명령 발급
+      ansible.builtin.command: kubeadm token create --print-join-command --ttl {{ k8s_join_token_ttl }}
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      run_once: true
+      register: join_command
+      changed_when: false
+
+    - name: 02-worker.sh 실행
+      ansible.builtin.command:
+        cmd: "{{ k8s_remote_script_dir }}/02-worker.sh '{{ join_command.stdout }}'"
+        chdir: "{{ k8s_remote_script_dir }}"
+      register: join_result
+      when: not joined.stat.exists or k8s_force_reinstall
+      changed_when: true
+      failed_when: join_result.rc != 0
+
+    - name: join 출력
+      ansible.builtin.debug:
+        msg: "{{ join_result.stdout_lines | default([]) }}"
+      when: join_result is not skipped
+
+- name: 클러스터 상태 확인
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    # 새 노드는 CNI Pod 가 뜬 뒤 Ready 가 된다. 시간이 조금 걸린다.
+    - name: 노드 Ready 대기
+      ansible.builtin.command: >-
+        kubectl wait --for=condition=Ready node --all --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: wait_result
+      changed_when: false
+      failed_when: false
+
+    - name: Ready 대기 실패 시 안내
+      ansible.builtin.debug:
+        msg:
+          - "일부 노드가 Ready 가 아니다. CNI DaemonSet 이 새 노드에 떴는지 확인한다."
+          - "kubectl get pods -n kube-system -o wide"
+          - "kubectl describe node <노드이름>"
+      when: wait_result.rc != 0
+
+    - name: 노드 목록
+      ansible.builtin.command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: nodes
+      changed_when: false
+
+    - name: 결과
+      ansible.builtin.debug:
+        msg: "{{ nodes.stdout_lines }}"

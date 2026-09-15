@@ -14,8 +14,15 @@
 | k9s | 클러스터 TUI 탐색 | 00 |
 | stern | 다중 Pod 로그 추적 | 00 |
 | multipass | 온프렘 VM | **04에서 설치** (지금은 불필요) |
+| UTM | VM 실행 (macOS) | 별도 설치 — [설치 기록 참조](kubeadm-setup.md) |
+| ansible | kubeadm 노드 준비 자동화 | 클러스터 구축 반복 시 ([`clusters/kubeadm/ansible`](../../clusters/kubeadm/ansible/)) |
 
 kustomize는 kubectl에 내장(`kubectl kustomize`)되어 별도 설치하지 않는다.
+
+> kind로 로컬 클러스터를 만드는 것과 별개로, **UTM VM 2대를 kubeadm으로 클러스터화**하는 절차와
+> 그 이유는 [kubeadm-setup.md](kubeadm-setup.md)에 정리했다. 스크립트는
+> [`clusters/kubeadm/`](../../clusters/kubeadm/)에 있다. kind와 달리 노드 준비 단계가 새로 생기며,
+> 04단계 W11의 사전 연습에 해당한다.
 
 ---
 

@@ -6,8 +6,14 @@
 clusters/
 ├── kind/
 │   └── study-cluster.yaml    # 3노드 로컬 클러스터 (00단계부터 계속 사용)
-└── kubeadm/                  # 04단계에서 작성 — Multipass VM 준비 + Ansible 플레이북
+└── kubeadm/                  # 04단계의 기반 — UTM VM 위 kubeadm 클러스터
+    ├── README.md             # 구축 절차와 트러블슈팅
+    ├── scripts/              # VM 안에서 실행하는 설치 스크립트 (공통/CP/워커/검증)
+    └── ansible/              # 호스트에서 실행하는 반복 훈련용 플레이북
 ```
+
+> kubeadm 설치의 **이유와 개념**은 [`00-setup/notes/kubeadm-setup.md`](../00-setup/notes/kubeadm-setup.md),
+> **실행 방법**은 [`kubeadm/README.md`](kubeadm/README.md) 에 있다.
 
 ## kind
 
@@ -29,7 +35,9 @@ kubectl label node study-control-plane ingress-ready=true
 
 ## kubeadm (04단계)
 
-Multipass로 VM을 띄우고 Ansible로 노드를 준비한 뒤 kubeadm으로 구축한다.
+UTM 또는 Multipass로 VM을 띄우고, 스크립트(`scripts/`) 또는 Ansible(`ansible/`)로 kubeadm 클러스터를 구축한다.
+자세한 절차는 [`kubeadm/README.md`](kubeadm/README.md) 참조.
+
 VM 생성 명령은 두 머신(Ubuntu / macOS)에서 동일하다.
 
 ```bash
@@ -38,4 +46,5 @@ multipass launch --name node1 --cpus 2 --memory 4G --disk 20G 24.04
 multipass launch --name node2 --cpus 2 --memory 4G --disk 20G 24.04
 ```
 
+> UTM을 쓴다면 네트워크 모드를 **Bridged**로 두어야 VM끼리 IP로 통신하고 호스트에서 SSH로 접속할 수 있다.
 > VM과 클러스터는 각 머신에서 새로 만든다. Git으로는 **재현 가능한 코드와 문서만** 동기화한다.
