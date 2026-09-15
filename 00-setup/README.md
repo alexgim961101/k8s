@@ -109,6 +109,16 @@ kind create cluster --config ../clusters/kind/study-cluster.yaml
 
 "부숴도 5분이면 돌아온다"는 확신이 있어야 이후 단계에서 과감하게 실험할 수 있다.
 
+### 세션 6 — CKA 실전 훈련
+
+00-setup에서 다룬 범위를 **CKA 문제 형식**으로 풀어본다.
+
+- [`labs/cka-drills.md`](labs/cka-drills.md) — 문제·풀이·자가 채점표·속도 드릴
+- 공식 [CKA Curriculum](https://github.com/cncf/curriculum)의 도메인 비중에 매핑해 두었다
+- 이 단계에서 풀 수 있는 것: 컨텍스트/kubeconfig, static pod, 노드·컴포넌트 트러블슈팅,
+  Service/DNS 진단, kubeadm 구축, 스케줄링/reconciliation
+- 02·03·04 범위는 문서 끝의 "다음 단계 예고"에 정리해 두었다
+
 ### (기록) UTM VM 위 kubeadm 클러스터
 
 kind와 **같은 구조**를 VM 위에 직접 세운다. kind의 노드가 kubeadm으로 구성된 컨테이너이므로,
