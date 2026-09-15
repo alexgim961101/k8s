@@ -1,9 +1,19 @@
-# kubeadm 클러스터 구축 (UTM VM 2대)
+# kubeadm 클러스터 구축 — 개념 정리
 
 > 확인 시점: 2026-09 / Kubernetes **v1.37.0**, containerd v2.3.5, Calico v3.32.2
 >
-> **실행할 스크립트는 [`clusters/kubeadm/`](../../clusters/kubeadm/)에 있다.** 이 문서는 "무엇을 왜 하는가"를
-> 기록하는 노트이고, 명령을 그대로 따라 치는 용도라면 [clusters/kubeadm/README.md](../../clusters/kubeadm/README.md)를 본다.
+> **이 문서는 "무엇을 왜 하는가"를 기록하는 노트다.** 명령을 그대로 따라 치는 용도라면
+> [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md)를 본다.
+
+## 실행 자산
+
+| 종류 | 위치 | 용도 |
+|---|---|---|
+| 설치 스크립트 | [`clusters/kubeadm/scripts/`](../../clusters/kubeadm/scripts/) | VM 안에서 수동 실행 (00 공통 → 01 CP → 02 워커 → 03 검증) |
+| Ansible | [`clusters/kubeadm/ansible/`](../../clusters/kubeadm/ansible/) | 호스트에서 실행. 반복 훈련(해체→재구축) |
+| 실행 절차 | [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md) | 명령과 옵션, 트러블슈팅 |
+
+이 노트는 그 자산들이 **왜 그렇게 생겼는지**를 설명한다.
 
 ## 왜 UTM VM + kubeadm 인가
 
@@ -23,7 +33,7 @@ VM 위에 직접 kubeadm을 돌리는 것과 구조가 같다. 다른 점은 다
 ## 전체 순서
 
 ```
-[호스트]  VM 2대 준비, SSH 접속 설정
+[호스트]  VM 2대 준비, SSH 접속 설정      → clusters/kubeadm/README.md 0장
              │
 [VM 공통] 00-common.sh      커널 모듈 · sysctl · swap · containerd · kubelet/kubeadm/kubectl
              │
@@ -45,33 +55,27 @@ UTM으로 VM 2대를 띄운다. 스크립트는 **Ubuntu 24.04**를 기준으로
 | `k8s-cp` | control-plane | 2 | 4G | 20G |
 | `k8s-w1` | worker | 2 | 4G | 20G |
 
-> **UTM 네트워크 모드는 "Bridged (Advanced)" 또는 "Emulated VLAN"** 을 쓴다.
-> "Shared Network"은 호스트에서 게스트로 직접 접속할 수 없어 SSH와 join이 번거로워진다.
-> Bridged로 두면 VM이 공유기에서 IP를 받아 **두 VM이 서로 IP로 통신**할 수 있다.
+### UTM에서 주의할 점
 
-**확인할 것**
+**네트워크 모드는 `Bridged (Advanced)`.** "Shared Network"은 호스트에서 게스트로 직접 접속할 수 없어
+SSH와 join이 번거로워진다. Bridged로 두면 VM이 공유기에서 IP를 받아 **두 VM이 서로 IP로 통신**할 수 있다.
+
+`product_uuid`가 겹치면 두 번째 노드가 클러스터에 등록되지 않는다. kubeadm은
+hostname/MAC/product_uuid로 노드를 식별하기 때문이다. UTM에서 **VM을 복제**하면 대개 겹치므로,
+복제 대신 각각 설치하거나 복제 후 UUID를 새로 만든다.
+
+**IP를 고정해두는 것을 권한다.** join 명령과 kubeconfig에 IP가 박히고, UTM은 DHCP라
+재부팅 시 IP가 바뀔 수 있다. netplan으로 고정하거나 DHCP 예약을 건다.
 
 ```bash
 hostname                                   # 두 VM이 서로 달라야 한다
 ip -4 addr show                            # 예: 192.168.0.5 / 192.168.0.6
 ping -c1 <상대 IP>                          # 양방향 통신
 sudo cat /sys/class/dmi/id/product_uuid    # VM마다 고유해야 한다
-```
 
-`product_uuid`가 겹치면 두 번째 노드가 클러스터에 등록되지 않는다. UTM에서 **VM을 복제**하면
-대개 겹치므로, 복제 대신 각각 설치하거나 복제 후 UUID를 새로 만든다.
-(kubeadm은 hostname/MAC/product_uuid로 노드를 식별한다.)
-
-호스트에서 편하게 접속:
-
-```bash
-ssh-copy-id ubuntu@192.168.0.5
+ssh-copy-id ubuntu@192.168.0.5             # 호스트에서
 ssh-copy-id ubuntu@192.168.0.6
 ```
-
-**IP를 고정해두는 것을 권한다.** kubeadm init 출력의 join 명령과 kubeconfig에 IP가 박히기 때문이다.
-UTM은 DHCP라 재부팅 시 IP가 바뀔 수 있다. 각 VM에서 netplan으로 고정하거나,
-DHCP 예약을 걸어둔다.
 
 ---
 
@@ -195,7 +199,7 @@ grep sandbox_image /etc/containerd/config.toml
 sudo ./01-control-plane.sh
 ```
 
-### flash 플래그 대신 YAML을 쓰는 이유
+### 플래그 나열 대신 YAML을 쓰는 이유
 
 kubeadm은 `--flag` 나열 방식과 `--config` YAML 방식을 모두 지원한다.
 학습 단계에서는 **YAML**을 권한다.

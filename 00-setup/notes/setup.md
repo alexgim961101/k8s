@@ -1,28 +1,31 @@
 # 학습 환경 구축 (두 머신 공통)
 
 > 00단계에서 1회 수행. 이후 머신을 바꿀 때마다 이 문서만 따라가면 동일한 환경이 된다.
-> 확인 시점: 2026-08-12 / kind 최신 릴리스 v0.32.0
+> 확인 시점: 2026-09-15 / kind **v0.33.0**, Kubernetes **v1.37.0**, helm v4.3.0 (v3.22.0 유지보수 중)
+>
+> 도구는 버전을 고정하지 않고 "최신" 또는 저장소 기본값을 쓴다. 버전을 올릴 때는 이 표와
+> 아래 명령의 가정(helm 3 vs 4 등)이 아직 맞는지 확인한다.
 
 ## 설치 대상
 
 | 도구 | 용도 | 필요 시점 |
 |---|---|---|
 | 컨테이너 런타임 | kind의 기반 | 00 |
-| kubectl | 모든 조작 | 00 (머신 A는 v1.36.1 설치됨) |
+| kubectl | 모든 조작 | 00 (버전은 클러스터보다 1개 마이너 낮거나 같은 것을 쓴다) |
 | kind | 로컬 멀티노드 클러스터 | 00 |
 | helm | 차트 배포 | 00 설치, 03부터 본격 사용 |
 | k9s | 클러스터 TUI 탐색 | 00 |
 | stern | 다중 Pod 로그 추적 | 00 |
 | multipass | 온프렘 VM | **04에서 설치** (지금은 불필요) |
-| UTM | VM 실행 (macOS) | 별도 설치 — [설치 기록 참조](kubeadm-setup.md) |
-| ansible | kubeadm 노드 준비 자동화 | 클러스터 구축 반복 시 ([`clusters/kubeadm/ansible`](../../clusters/kubeadm/ansible/)) |
+| UTM | VM 실행 (macOS) | 클러스터를 VM에 올릴 때 — [kubeadm-setup.md](kubeadm-setup.md) |
+| ansible | kubeadm 노드 준비 자동화 | 클러스터 해체→재구축 반복 시 ([`clusters/kubeadm/ansible`](../../clusters/kubeadm/ansible/)) |
 
 kustomize는 kubectl에 내장(`kubectl kustomize`)되어 별도 설치하지 않는다.
 
 > kind로 로컬 클러스터를 만드는 것과 별개로, **UTM VM 2대를 kubeadm으로 클러스터화**하는 절차와
-> 그 이유는 [kubeadm-setup.md](kubeadm-setup.md)에 정리했다. 스크립트는
-> [`clusters/kubeadm/`](../../clusters/kubeadm/)에 있다. kind와 달리 노드 준비 단계가 새로 생기며,
-> 04단계 W11의 사전 연습에 해당한다.
+> 그 이유는 [kubeadm-setup.md](kubeadm-setup.md)에 정리했다(kind 노드도 kubeadm 구성이라 구조가 같다).
+> 실행 명령은 [`clusters/kubeadm/README.md`](../../clusters/kubeadm/README.md)에 있다.
+> kind와 달리 노드 준비 단계가 새로 생기며, 04단계 W11의 사전 연습에 해당한다.
 
 ---
 
@@ -37,8 +40,10 @@ KIND_VERSION=$(curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/rele
 curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
 sudo install -m 0755 /tmp/kind /usr/local/bin/kind
 
-# helm — 공식 설치 스크립트 (내부에서 sudo 사용)
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# helm — 공식 설치 스크립트 (내부적으로 sudo 사용)
+#   helm 4가 나왔고 v3는 유지보수 모드다. 새로 시작하면 4를 쓴다.
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
+# v3가 필요하면 get-helm-3 을 쓴다 (버그 수정 ~2026-07, 보안 수정 ~2026-11)
 
 # k9s
 K9S_VERSION=$(curl -fsSL https://api.github.com/repos/derailed/k9s/releases/latest \

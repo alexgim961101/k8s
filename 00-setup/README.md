@@ -17,11 +17,20 @@
 - [ ] 로컬 클러스터 도구 비교: kind / minikube / k3d — 이 저장소가 kind를 주력으로 쓰는 이유
 - [ ] kubeconfig 구조: cluster(어디로) / user(누구로) / context(그 둘의 조합)
 
+## 파일 구성
+
+| 경로 | 내용 |
+|---|---|
+| [`notes/setup.md`](notes/setup.md) | 두 머신(Ubuntu / macOS)의 도구 설치 — 머신을 바꿀 때마다 이 문서만 |
+| [`notes/kubeadm-setup.md`](notes/kubeadm-setup.md) | VM 위 kubeadm 클러스터의 **개념 정리** (각 설정이 왜 필요한가) |
+| [`labs/cka/`](labs/cka/) | 00-setup 범위 **CKA 실전 문제** ([목록](labs/cka/README.md)) |
+| [`../clusters/kubeadm/`](../clusters/kubeadm/) | kubeadm 설치 스크립트 + Ansible ([실행 절차](../clusters/kubeadm/README.md)) |
+
 ## 실습 (labs/)
 
 ### 세션 1 — 환경 구축과 첫 클러스터
 
-[`notes/setup.md`](notes/setup.md) 를 따라 도구를 설치한 뒤:
+[`notes/setup.md`](notes/setup.md) 를 따라 도구를 설치한 뒤 클러스터를 만든다.
 
 ```bash
 kind create cluster --config ../clusters/kind/study-cluster.yaml
@@ -38,7 +47,7 @@ docker exec -it study-control-plane crictl ps    # 그 안에서 컨테이너가
 kind의 노드는 **kubeadm으로 구성된 컨테이너**다. [04-onprem-cka](../04-onprem-cka/)에서 VM 위에
 직접 kubeadm으로 클러스터를 세울 때 지금 본 구조가 그대로 반복된다.
 
-### 세션 2 — 클러스터 해부
+### 세션 2 — 클러스터 해부와 kubectl 기본기
 
 ```bash
 kubectl get pods -n kube-system -o wide
@@ -59,9 +68,7 @@ docker exec study-control-plane ls /etc/kubernetes/manifests/
 | kubelet | | |
 | kube-proxy | | |
 
-### 세션 3 — kubectl 기본기
-
-속도가 나중에 CKA 점수가 된다.
+kubectl 기본기 — **속도가 나중에 CKA 점수가 된다.**
 
 ```bash
 kubectl get pods -A -o wide
@@ -84,7 +91,7 @@ echo 'complete -F __start_kubectl k' >> ~/.zshrc
 
 `k9s` 도 띄워본다. 탐색은 k9s가 빠르지만 **시험과 자동화는 kubectl이므로 kubectl을 주로 쓴다**.
 
-### 세션 4 — 관통 프로젝트 첫 배포
+### 세션 3 — 관통 프로젝트 첫 배포
 
 [`app/README.md`](../app/README.md) 에서 관통 프로젝트를 정하고 컨테이너화한다.
 
@@ -98,9 +105,24 @@ kubectl port-forward pod/api 3000:3000
 > **이미지 태그에 `latest` 를 쓰지 않는다.** `imagePullPolicy` 기본값이 태그에 따라 달라져
 > 갱신이 안 되는 혼란을 겪는다. [03-operations](../03-operations/)에서 정책으로 아예 금지시킬 것이다.
 
+### 세션 4 — CKA 실전 훈련
+
+00-setup 범위를 **CKA 문제 형식**으로 풀어본다. → [`labs/cka/`](labs/cka/)
+
+| 유형 | 내용 |
+|---|---|
+| A~B | kubeconfig/context, static pod |
+| C~E | 노드 · 컴포넌트 · Service/DNS 트러블슈팅 |
+| F | kubeadm 노드 사전 준비와 구축 |
+| G | 스케줄링과 reconciliation |
+| 드릴 | 즉시 답하기, 고장→5분 복구, [시험장 치트시트](labs/cka/10-cheatsheet.md) |
+
+공식 [CKA Curriculum](https://github.com/cncf/curriculum) 도메인에 매핑해 두었다.
+[자가 채점표](labs/cka/11-scoring.md)로 약점을 기록하고, 못 푸는 항목은 "다음 단계 예고"에서 확인한다.
+
 ### 세션 5 — 반복 훈련
 
-**클러스터를 5회 부수고 다시 만든다.**
+**kind 클러스터를 5회 부수고 다시 만든다.**
 
 ```bash
 kind delete cluster --name study
@@ -109,50 +131,39 @@ kind create cluster --config ../clusters/kind/study-cluster.yaml
 
 "부숴도 5분이면 돌아온다"는 확신이 있어야 이후 단계에서 과감하게 실험할 수 있다.
 
-### 세션 6 — CKA 실전 훈련
-
-00-setup에서 다룬 범위를 **CKA 문제 형식**으로 풀어본다.
-
-- [`labs/cka-drills.md`](labs/cka-drills.md) — 문제·풀이·자가 채점표·속도 드릴
-- 공식 [CKA Curriculum](https://github.com/cncf/curriculum)의 도메인 비중에 매핑해 두었다
-- 이 단계에서 풀 수 있는 것: 컨텍스트/kubeconfig, static pod, 노드·컴포넌트 트러블슈팅,
-  Service/DNS 진단, kubeadm 구축, 스케줄링/reconciliation
-- 02·03·04 범위는 문서 끝의 "다음 단계 예고"에 정리해 두었다
-
-### (기록) UTM VM 위 kubeadm 클러스터
-
-kind와 **같은 구조**를 VM 위에 직접 세운다. kind의 노드가 kubeadm으로 구성된 컨테이너이므로,
-여기서 하는 일이 [04-onprem-cka](../04-onprem-cka/) W11의 예행연습이 된다.
-
-- 스크립트: [`clusters/kubeadm/`](../clusters/kubeadm/) — 공통 / 컨트롤 플레인 / 워커 / 검증 + Ansible
-- 설치 기록: [`notes/kubeadm-setup.md`](notes/kubeadm-setup.md) — VM 준비부터 트러블슈팅까지
-
-kind와 달리 **"노드 준비" 단계가 새로 생긴다** (커널 모듈, swap, containerd, cgroup driver).
-여기서 사고가 나면 대부분 조용히 깨지므로(예: `br_netfilter` 누락 → Service만 안 됨),
-"왜 이 설정이 필요한가"를 함께 기록해 두었다.
+같은 훈련을 **VM + kubeadm**으로도 반복한다. 이쪽은 클러스터 수명주기 자체가 학습 대상이고,
+[04-onprem-cka](../04-onprem-cka/) W11의 예행연습이 된다.
 
 ```bash
-# 호스트 → VM 으로 스크립트 전송 (두 VM 모두)
-scp -r clusters/kubeadm/scripts ubuntu@<CP-IP>:~/
-scp -r clusters/kubeadm/scripts ubuntu@<WORKER-IP>:~/
-
-# 두 VM 공통
+# 설치 (VM 안에서) — 두 VM 공통 → 컨트롤 플레인 → 워커 → 검증
 sudo ~/scripts/00-common.sh
-# 컨트롤 플레인
 sudo ~/scripts/01-control-plane.sh
-# 워커 (join 명령은 컨트롤 플레인에서 발급)
 sudo ~/scripts/02-worker.sh "kubeadm join ..."
-# 검증 (컨트롤 플레인)
 ~/scripts/03-verify.sh
+
+# 해체 → 재구축 (호스트에서, Ansible)
+cd clusters/kubeadm/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/reset-cluster.yml
+ansible-playbook -i inventory/hosts.ini playbooks/02-install-common.yml
+ansible-playbook -i inventory/hosts.ini playbooks/03-init-control-plane.yml
+ansible-playbook -i inventory/hosts.ini playbooks/04-join-workers.yml
 ```
+
+- 실행 절차와 옵션: [`clusters/kubeadm/README.md`](../clusters/kubeadm/README.md)
+- 각 설정이 왜 필요한가: [`notes/kubeadm-setup.md`](notes/kubeadm-setup.md)
+
+kind와 달리 **"노드 준비" 단계가 새로 생긴다** (커널 모듈, swap, containerd, cgroup driver).
+여기서 사고가 나면 대부분 조용히 깨지므로(예: `br_netfilter` 누락 → Service만 안 됨) 이유를 함께 익힌다.
 
 ## 완료 기준
 
-- [ ] 빈 상태에서 멀티노드 클러스터를 5분 안에 재구축하고 앱 Pod 1개에 접속
-- [ ] 컨트롤 플레인 컴포넌트 표를 직접 채우고, 최소 2개는 실제로 멈춰서 확인
+- [ ] 빈 상태에서 멀티노드 kind 클러스터를 5분 안에 재구축하고 앱 Pod 1개에 접속
+- [ ] 컨트롤 플레인 컴포넌트 표를 직접 채우고, **최소 2개는 실제로 멈춰서** 확인
 - [ ] `kubectl explain` 으로 필드를 찾아내는 습관 형성
 - [ ] kind 노드가 컨테이너이고 그 안이 kubeadm 구성임을 직접 확인
-- [ ] `notes/` 에 이론 정리 작성
+- [ ] [`labs/cka/`](labs/cka/) 문제를 풀고 자가 채점표에 약점 기록
+- [ ] 노드가 `NotReady`인 원인을 최소 3가지 만들고 **구분해서** 진단
+- [ ] `notes/` 에 이론 정리 작성 (컨트롤 플레인 컴포넌트 표 포함)
 
 ## 셀프 체크
 
@@ -161,3 +172,5 @@ sudo ~/scripts/02-worker.sh "kubeadm join ..."
 3. kube-scheduler를 멈추면 **기존 Pod**와 **새로 만든 Pod**에 각각 무슨 일이 일어나는가?
 4. kubeconfig의 cluster / user / context는 각각 무엇을 가리키며 어떻게 묶이는가?
 5. "선언적"이라는 말을 reconciliation loop를 써서 설명할 수 있는가? `kubectl delete` 로 지운 Deployment의 Pod는 왜 다시 살아나지 않고, `kubectl delete pod` 로 지운 Pod는 왜 다시 살아나는가?
+
+→ 각 질문에 대응하는 CKA 문제는 [`labs/cka/README.md`](labs/cka/README.md) 의 매핑표에 있다.

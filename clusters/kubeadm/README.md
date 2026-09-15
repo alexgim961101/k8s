@@ -7,6 +7,9 @@ UTM VM 2대를 **kubeadm**으로 클러스터로 만든다. kind가 대신 해�
 아래 Ansible은 **호스트에서** 실행한다. 직접 넣어보는 것이 목적이라 순서대로 따라가는 것을 기본으로 하고,
 Ansible은 반복 훈련용으로 쓴다.
 
+> **개념·이유는 [`00-setup/notes/kubeadm-setup.md`](../../00-setup/notes/kubeadm-setup.md) 에 있다.**
+> 이 문서는 **실행 절차**만 다룬다. "왜 br_netfilter가 필요한가" 같은 질문은 그쪽을 본다.
+
 ## 이 문서에서 한 번만 읽으면 되는 것
 
 - 설치 순서: **공통 준비 → 컨트롤 플레인 init → 워커 join**
@@ -56,7 +59,7 @@ clusters/kubeadm/
 
 ---
 
-## 0. VM 준비 (UTM)
+## 0. VM 준비
 
 VM 2대가 이미 있다고 가정한다. 다음만 맞춰준다.
 
@@ -64,6 +67,14 @@ VM 2대가 이미 있다고 가정한다. 다음만 맞춰준다.
 |---|---|---|
 | `k8s-cp` | control-plane | CPU 2, RAM 4G, Disk 20G |
 | `k8s-w1` | worker | CPU 2, RAM 4G, Disk 20G |
+
+> **UTM을 쓴다면 네트워크 모드를 `Bridged (Advanced)`로.** `Shared Network`는 호스트에서 게스트로
+> 직접 접속할 수 없어 SSH와 join이 번거로워진다. UTM이 아닌 다른 하이퍼바이저(Multipass 등)도 같다.
+>
+> **UTM으로 VM을 복제했다면 `product_uuid`가 겹칠 가능성이 높다.** 겹치면 두 번째 노드가
+> 클러스터에 등록되지 않으므로, 복제 대신 각각 새로 설치하거나 복제 후 새 UUID를 생성한다.
+> 그 밖의 UTM 관련 함정(IP가 DHCP로 바뀌는 문제 등)은
+> [`00-setup/notes/kubeadm-setup.md`](../../00-setup/notes/kubeadm-setup.md) 에 정리해 두었다.
 
 **확인할 것**
 
@@ -75,8 +86,8 @@ ping -c1 <상대 IP> # 양방향 통신
 sudo cat /sys/class/dmi/id/product_uuid   # VM마다 고유해야 한다
 ```
 
-`product_uuid`가 겹치면 노드 등록이 실패한다. UTM에서 VM을 **복제**했다면 십중팔구 겹친다 —
-복제 대신 각각 새로 설치하거나, 복제 후 새 UUID를 생성한다.
+kubeadm init이 출력하는 join 명령에 IP가 박히므로 **IP를 고정해두는 것을 권한다**
+(DHCP 예약 또는 netplan).
 
 **호스트에서 SSH 접속을 편하게**
 
@@ -97,34 +108,19 @@ ssh ubuntu@<CP-IP>
 sudo ~/scripts/00-common.sh
 ```
 
-이 스크립트가 하는 일:
+이 스크립트는 다음을 설치·설정한다. **각 항목이 왜 필요한지는
+[`00-setup/notes/kubeadm-setup.md`](../../00-setup/notes/kubeadm-setup.md) 의 "이 단계가 하는 일과 이유"에 있다.**
 
-| 단계 | 내용 | 왜 필요한가 |
-|---|---|---|
-| 커널 모듈 | `overlay`, `br_netfilter` | overlayfs(컨테이너), bridge 트래픽의 iptables 통과 |
-| sysctl | `ip_forward=1`, `bridge-nf-call-iptables=1` | Pod 간 라우팅, Service ClusterIP |
-| swap | `swapoff` + fstab 주석 + `swap.target` mask | kubelet은 swap이 있으면 시작을 거부한다 |
-| containerd | v2.3.5 tarball | CRI 런타임. 패키지 버전이 배포판마다 달라 tarball로 고정 |
-| cgroup driver | `SystemdCgroup = true` | Ubuntu 24.04는 cgroup v2. kubelet과 런타임이 같은 드라이버를 써야 한다 |
-| sandbox 이미지 | `pause:3.10.2` | k8s 1.37과 containerd 기본값이 어긋나면 Pod가 뜨지 않는다 |
-| runc | v1.5.1 | tarball에 없다 |
-| CNI plugins | `/opt/cni/bin` | CNI 설치 전에도 `crictl`로 디버깅 가능 |
-| kubelet/kubeadm/kubectl | pkgs.k8s.io v1.37 | `apt-mark hold`로 자동 업그레이드 차단 |
-| kubelet | **중지 상태로 둠** | kubeadm이 지시를 줄 때까지 crashloop이 정상이다 |
-
-확인:
-
-```bash
-swapon --show                       # 아무것도 없어야 한다
-sysctl net.ipv4.ip_forward          # 1
-sysctl net.bridge.bridge-nf-call-iptables   # 1
-systemctl is-active containerd      # active
-sudo crictl ps                      # 컨테이너 런타임이 응답하는가
-kubeadm version -o short            # v1.37.0
-```
-
-**재실행해도 안전하다.** 이미 클러스터에 참여한 노드(`/etc/kubernetes/kubelet.conf` 존재)에서는
-containerd/kubelet을 **재시작하지 않는다.** 설정 때문에 재시작이 필요하면 수동으로 한다.
+| 단계 | 내용 |
+|---|---|
+| 커널 모듈 | `overlay`, `br_netfilter` |
+| sysctl | `ip_forward=1`, `bridge-nf-call-iptables=1` |
+| swap | `swapoff` + fstab 주석 + `swap.target` mask |
+| containerd | v2.3.5 tarball + `SystemdCgroup = true` |
+| runc | v1.5.1 (tarball에 없다) |
+| CNI plugins | `/opt/cni/bin` |
+| crictl | `/etc/crictl.yaml`에 소켓 등록 |
+| kubelet/kubeadm/kubectl | pkgs.k8s.io v1.37 + `apt-mark hold` |
 
 > `apt-get install`이 배포판의 `containerd` 패키지를 끌고 와 있는 경우가 있다.
 > 그 상태에서는 공식 tarball과 충돌해 엉뚱한 버전이 소켓을 잡는다.
